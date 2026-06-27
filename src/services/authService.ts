@@ -26,6 +26,19 @@ const DEMO_USER: User = {
   updatedAt: new Date('2026-06-27T00:00:00.000Z'),
 };
 
+type AuthCallback = (user: User | null) => void;
+const authListeners = new Set<AuthCallback>();
+
+function notifyAuthListeners(user: User | null) {
+  authListeners.forEach((listener) => {
+    try {
+      listener(user);
+    } catch (e) {
+      console.error('Error notifying auth listener:', e);
+    }
+  });
+}
+
 // Check if Firebase is initialized
 const isFirebaseReady = () => {
   if (!auth || !db) {
@@ -65,11 +78,14 @@ export async function registerWithEmail(email: string, password: string, display
 export async function loginWithEmail(email: string, password: string): Promise<User> {
   if (email.trim().toUpperCase() === DEMO_USERNAME && password === DEMO_PASSWORD) {
     localStorage.setItem('goatie_logged_in_user', JSON.stringify(DEMO_USER));
+    notifyAuthListeners(DEMO_USER);
     return DEMO_USER;
   }
   isFirebaseReady();
   const userCredential = await signInWithEmailAndPassword(auth!, email, password);
-  return await getUserFromFirestore(userCredential.user.uid);
+  const user = await getUserFromFirestore(userCredential.user.uid);
+  notifyAuthListeners(user);
+  return user;
 }
 
 export async function loginWithGoogle(): Promise<User> {
@@ -94,11 +110,13 @@ export async function loginWithGoogle(): Promise<User> {
     await setDoc(doc(db!, 'users', user.id), user);
   }
 
+  notifyAuthListeners(user);
   return user;
 }
 
 export async function logout(): Promise<void> {
   localStorage.removeItem('goatie_logged_in_user');
+  notifyAuthListeners(null);
   if (auth) {
     await signOut(auth!);
   }
@@ -138,6 +156,9 @@ export async function getUserFromFirestore(userId: string): Promise<User> {
 }
 
 export function onAuthChange(callback: (user: User | null) => void): () => void {
+  authListeners.add(callback);
+
+  // Invoke with current cached state immediately to avoid initial redirect
   const cachedDemoUser = localStorage.getItem('goatie_logged_in_user');
   if (cachedDemoUser) {
     try {
@@ -145,31 +166,37 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
       user.createdAt = new Date(user.createdAt);
       user.updatedAt = new Date(user.updatedAt);
       callback(user);
-      return () => {};
     } catch (e) {
       console.error('Error parsing cached demo user:', e);
-    }
-  }
-
-  if (!auth) {
-    console.warn('Firebase Auth not initialized');
-    callback(null);
-    return () => {};
-  }
-  
-  return onAuthStateChanged(auth, async (firebaseUser) => {
-    if (firebaseUser) {
-      try {
-        const user = await getUserFromFirestore(firebaseUser.uid);
-        callback(user);
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-        callback(null);
-      }
-    } else {
       callback(null);
     }
-  });
+  } else if (!auth) {
+    callback(null);
+  }
+
+  let unsubscribeFirebase = () => {};
+  if (auth) {
+    unsubscribeFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (localStorage.getItem('goatie_logged_in_user')) return; // Ignore if demo user is active
+
+      if (firebaseUser) {
+        try {
+          const user = await getUserFromFirestore(firebaseUser.uid);
+          callback(user);
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          callback(null);
+        }
+      } else {
+        callback(null);
+      }
+    });
+  }
+
+  return () => {
+    authListeners.delete(callback);
+    unsubscribeFirebase();
+  };
 }
 
 export function getAuthToken(): Promise<string | null> {
