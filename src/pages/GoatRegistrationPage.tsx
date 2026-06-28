@@ -75,13 +75,12 @@ export const GoatRegistrationPage: React.FC = () => {
       const barcode = generateBarcode(formData.earTagNumber);
 
       // Create goat record
-      const goatId = await createGoat(user.id, {
+      await createGoat(user.id, {
         earTagNumber: formData.earTagNumber,
         purchaseDate: new Date(formData.purchaseDate),
         purchaseWeight: parseFloat(formData.purchaseWeight),
         variant: formData.variant,
         gender: formData.gender as 'male' | 'female',
-        age: parseInt(formData.age) || undefined,
         purchasePrice: parseFloat(formData.purchasePrice),
         sellerName: 'N/A',
         notes: formData.notes || undefined,
@@ -91,7 +90,7 @@ export const GoatRegistrationPage: React.FC = () => {
       });
 
       showToast('success', 'Goat registered successfully');
-      navigate(`/goats/${goatId}`);
+      navigate('/goats');
     } catch (error: any) {
       showToast('error', 'Failed to register goat', error.message);
     } finally {
@@ -182,30 +181,17 @@ export const GoatRegistrationPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="purchasePrice">Purchase Price (₹)</Label>
-                  <Input
-                    id="purchasePrice"
-                    type="number"
-                    placeholder="0.00"
-                    step="0.01"
-                    value={formData.purchasePrice}
-                    onChange={(e) => setFormData({ ...formData, purchasePrice: e.target.value })}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="age">Age (months)</Label>
-                  <Input
-                    id="age"
-                    type="number"
-                    placeholder="Optional"
-                    value={formData.age}
-                    onChange={(e) => setFormData({ ...formData, age: e.target.value })}
-                  />
-                </div>
+              <div>
+                <Label htmlFor="purchasePrice">Purchase Price (₹)</Label>
+                <Input
+                  id="purchasePrice"
+                  type="number"
+                  placeholder="0.00"
+                  step="0.01"
+                  value={formData.purchasePrice}
+                  onChange={(e) => setFormData({ ...formData, purchasePrice: e.target.value })}
+                  required
+                />
               </div>
             </div>
 

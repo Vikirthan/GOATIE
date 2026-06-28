@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { Goat } from '@/types';
 
-// Exact column headers based on UI language (Seller details removed)
+// Exact column headers based on UI language (Seller and Age details removed)
 const COLUMNS = {
   earTagNumber: 'Goat Number (Ear Tag)',
   variant: 'Variant/Breed',
@@ -9,7 +9,6 @@ const COLUMNS = {
   purchaseDate: 'Purchase Date',
   purchaseWeight: 'Purchase Weight (kg)',
   purchasePrice: 'Purchase Price (₹)',
-  age: 'Age (months)',
   notes: 'Notes',
   status: 'Status'
 };
@@ -27,7 +26,6 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
     { header: COLUMNS.purchaseDate, key: 'purchaseDate', width: 18 },
     { header: COLUMNS.purchaseWeight, key: 'purchaseWeight', width: 22 },
     { header: COLUMNS.purchasePrice, key: 'purchasePrice', width: 20 },
-    { header: COLUMNS.age, key: 'age', width: 15 },
     { header: COLUMNS.notes, key: 'notes', width: 30 },
     { header: COLUMNS.status, key: 'status', width: 15 }
   ];
@@ -41,7 +39,6 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
       purchaseDate: goat.purchaseDate ? new Date(goat.purchaseDate).toISOString().split('T')[0] : '',
       purchaseWeight: goat.purchaseWeight,
       purchasePrice: goat.purchasePrice,
-      age: goat.age || '',
       notes: goat.notes || '',
       status: goat.status
     });
@@ -149,7 +146,6 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
 
           const purchaseWeight = parseFloat(getCellVal(COLUMNS.purchaseWeight)?.toString() || '0');
           const purchasePrice = parseFloat(getCellVal(COLUMNS.purchasePrice)?.toString() || '0');
-          const age = parseInt(getCellVal(COLUMNS.age)?.toString() || '') || undefined;
           const notes = getCellVal(COLUMNS.notes)?.toString().trim() || undefined;
 
           let status = getCellVal(COLUMNS.status)?.toString().trim().toLowerCase();
@@ -164,8 +160,7 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
             purchaseDate,
             purchaseWeight,
             purchasePrice,
-            age,
-            sellerName: 'N/A', // Omitted from Excel sheet but defaulted here for DB schema compatibility
+            sellerName: 'N/A', // Defaulted here for DB schema compatibility
             notes,
             status: status as 'active' | 'sold' | 'deceased'
           });
