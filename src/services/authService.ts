@@ -1,17 +1,5 @@
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  updateProfile,
-  GoogleAuthProvider,
-  signInWithPopup,
-} from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase';
 import { User } from '@/types';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-
-const googleProvider = new GoogleAuthProvider();
 
 // Hardcoded credentials for demo
 const DEMO_USERNAME = 'RKT';
@@ -39,38 +27,46 @@ function notifyAuthListeners(user: User | null) {
   });
 }
 
-// Check if Firebase is initialized
-const isFirebaseReady = () => {
-  if (!auth || !db) {
-    throw new Error('Firebase is not initialized. Please configure your Firebase credentials.');
-  }
-};
-
 // Check if using demo credentials
 export function isDemoMode(): boolean {
-  return !auth || !db || localStorage.getItem('goatie_logged_in_user') !== null;
+  return localStorage.getItem('goatie_logged_in_user') !== null;
 }
 
 export async function registerWithEmail(email: string, password: string, displayName: string): Promise<User> {
-  isFirebaseReady();
-  const userCredential = await createUserWithEmailAndPassword(auth!, email, password);
-  
-  await updateProfile(userCredential.user, {
-    displayName,
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        display_name: displayName,
+      },
+    },
   });
 
+  if (error) throw error;
+  if (!data.user) throw new Error('Failed to register user');
+
   const user: User = {
-    id: userCredential.user.uid,
-    email: userCredential.user.email || '',
+    id: data.user.id,
+    email: data.user.email || '',
     displayName: displayName,
-    photoURL: userCredential.user.photoURL || undefined,
     role: 'farmer',
     createdAt: new Date(),
     updatedAt: new Date(),
   };
 
-  // Save user to Firestore
-  await setDoc(doc(db!, 'users', user.id), user);
+  // Upsert user profile to public.profiles table (fallback if DB trigger is delayed/disabled)
+  const { error: profileError } = await supabase.from('profiles').upsert({
+    id: user.id,
+    email: user.email,
+    display_name: user.displayName,
+    role: user.role,
+    updated_at: new Date(),
+  });
+
+  if (profileError) {
+    console.warn('Profile sync warning:', profileError.message);
+  }
 
   return user;
 }
@@ -81,45 +77,33 @@ export async function loginWithEmail(email: string, password: string): Promise<U
     notifyAuthListeners(DEMO_USER);
     return DEMO_USER;
   }
-  isFirebaseReady();
-  const userCredential = await signInWithEmailAndPassword(auth!, email, password);
-  const user = await getUserFromFirestore(userCredential.user.uid);
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) throw error;
+  if (!data.user) throw new Error('User login failed');
+
+  const user = await getUserFromSupabase(data.user.id);
   notifyAuthListeners(user);
   return user;
 }
 
 export async function loginWithGoogle(): Promise<User> {
-  isFirebaseReady();
-  const result = await signInWithPopup(auth!, googleProvider);
-  
-  // Check if user exists in Firestore
-  let user = await getUserFromFirestore(result.user.uid);
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+  });
 
-  if (!user) {
-    // Create new user
-    user = {
-      id: result.user.uid,
-      email: result.user.email || '',
-      displayName: result.user.displayName || '',
-      photoURL: result.user.photoURL || undefined,
-      role: 'farmer',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    await setDoc(doc(db!, 'users', user.id), user);
-  }
-
-  notifyAuthListeners(user);
-  return user;
+  if (error) throw error;
+  throw new Error('Google Sign-In redirected. Session will load automatically.');
 }
 
 export async function logout(): Promise<void> {
   localStorage.removeItem('goatie_logged_in_user');
   notifyAuthListeners(null);
-  if (auth) {
-    await signOut(auth!);
-  }
+  await supabase.auth.signOut();
 }
 
 export async function getCurrentUser(): Promise<User | null> {
@@ -134,25 +118,37 @@ export async function getCurrentUser(): Promise<User | null> {
       console.error('Error parsing cached demo user:', e);
     }
   }
-  if (!auth) return null;
-  const firebaseUser = auth.currentUser;
-  if (!firebaseUser) return null;
 
-  return await getUserFromFirestore(firebaseUser.uid);
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session?.user) return null;
+
+  try {
+    return await getUserFromSupabase(session.user.id);
+  } catch (e) {
+    console.error('Error fetching current user profile:', e);
+    return null;
+  }
 }
 
-export async function getUserFromFirestore(userId: string): Promise<User> {
-  if (!db) {
-    throw new Error('Firebase Firestore is not initialized');
-  }
-  
-  const userDoc = await getDoc(doc(db, 'users', userId));
+export async function getUserFromSupabase(userId: string): Promise<User> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .single();
 
-  if (!userDoc.exists()) {
-    throw new Error('User not found');
+  if (error || !data) {
+    throw new Error(error?.message || 'User profile not found in Supabase database');
   }
 
-  return userDoc.data() as User;
+  return {
+    id: data.id,
+    email: data.email,
+    displayName: data.display_name || 'Farmer',
+    role: data.role || 'farmer',
+    createdAt: new Date(data.created_at),
+    updatedAt: new Date(data.updated_at),
+  };
 }
 
 export function onAuthChange(callback: (user: User | null) => void): () => void {
@@ -170,42 +166,46 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
       console.error('Error parsing cached demo user:', e);
       callback(null);
     }
-  } else if (!auth) {
-    callback(null);
-  }
-
-  let unsubscribeFirebase = () => {};
-  if (auth) {
-    unsubscribeFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (localStorage.getItem('goatie_logged_in_user')) return; // Ignore if demo user is active
-
-      if (firebaseUser) {
-        try {
-          const user = await getUserFromFirestore(firebaseUser.uid);
-          callback(user);
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          callback(null);
-        }
+  } else {
+    // If not demo user, fetch session state to notify listeners
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (localStorage.getItem('goatie_logged_in_user')) return;
+      if (session?.user) {
+        getUserFromSupabase(session.user.id)
+          .then((user) => callback(user))
+          .catch(() => callback(null));
       } else {
         callback(null);
       }
     });
   }
 
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    if (localStorage.getItem('goatie_logged_in_user')) return; // Ignore if demo user is active
+
+    if (session?.user) {
+      try {
+        const user = await getUserFromSupabase(session.user.id);
+        callback(user);
+      } catch (error) {
+        console.error('Error fetching user data on auth change:', error);
+        callback(null);
+      }
+    } else {
+      callback(null);
+    }
+  });
+
   return () => {
     authListeners.delete(callback);
-    unsubscribeFirebase();
+    subscription.unsubscribe();
   };
 }
 
-export function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(): Promise<string | null> {
   if (localStorage.getItem('goatie_logged_in_user')) {
-    return Promise.resolve('demo_token');
+    return 'demo_token';
   }
-  if (!auth || !auth.currentUser) {
-    return Promise.resolve(null);
-  }
-  return auth.currentUser.getIdToken() ?? Promise.resolve(null);
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token || null;
 }
-
