@@ -1,307 +1,30 @@
-import { supabase } from '@/lib/supabase';
+import {
+  collection,
+  doc,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
+  getDoc,
+  query,
+  where,
+  orderBy,
+  Query,
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
 import { generateId } from '@/utils/helpers';
 import * as indexedDB from '@/lib/indexeddb';
 import * as sheetsService from './sheetsStorageService';
 
-// Determine if we should route to Sheets/IndexedDB instead of Supabase
+// Determine if we should route to Sheets/IndexedDB instead of Firestore
 const useSheetsOrLocal = (): boolean => {
   const cachedDemoUser = localStorage.getItem('goatie_logged_in_user');
   const isDemo = cachedDemoUser !== null;
-  return isDemo || sheetsService.isSheetsConfigured();
+  return isDemo || !db || sheetsService.isSheetsConfigured();
 };
 
-// --- MAPPING HELPERS FOR SUPABASE (snake_case Postgres <-> camelCase TS) ---
-
-function mapGoatFromDB(row: any): Goat {
-  return {
-    id: row.id,
-    earTagNumber: row.ear_tag_number,
-    farmerId: row.farmer_id,
-    purchaseDate: new Date(row.purchase_date),
-    purchaseWeight: Number(row.purchase_weight),
-    purchasePrice: Number(row.purchase_price),
-    variant: row.variant,
-    gender: row.gender,
-    sellerName: row.seller_name || 'N/A',
-    sellerContact: row.seller_contact || undefined,
-    notes: row.notes || undefined,
-    photoURL: row.photo_url || undefined,
-    qrCode: row.qr_code || undefined,
-    barcode: row.barcode || undefined,
-    status: row.status,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function mapGoatToDB(goat: Goat): any {
-  return {
-    id: goat.id,
-    farmer_id: goat.farmerId,
-    ear_tag_number: goat.earTagNumber,
-    purchase_date: goat.purchaseDate.toISOString(),
-    purchase_weight: goat.purchaseWeight,
-    purchase_price: goat.purchasePrice,
-    variant: goat.variant,
-    gender: goat.gender,
-    seller_name: goat.sellerName || 'N/A',
-    seller_contact: goat.sellerContact || null,
-    notes: goat.notes || null,
-    photo_url: goat.photoURL || null,
-    qr_code: goat.qrCode || null,
-    barcode: goat.barcode || null,
-    status: goat.status,
-    created_at: goat.createdAt.toISOString(),
-    updated_at: goat.updatedAt.toISOString(),
-  };
-}
-
-function mapWeightFromDB(row: any): WeightRecord {
-  return {
-    id: row.id,
-    goatId: row.goat_id,
-    weightNumber: row.weight_number,
-    weight: Number(row.weight),
-    dueDate: new Date(row.due_date),
-    recordedDate: row.recorded_date ? new Date(row.recorded_date) : undefined,
-    remarks: row.remarks || undefined,
-    isRecorded: row.is_recorded,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function mapWeightToDB(w: WeightRecord): any {
-  return {
-    id: w.id,
-    goat_id: w.goatId,
-    weight_number: w.weightNumber,
-    weight: w.weight,
-    due_date: w.dueDate.toISOString(),
-    recorded_date: w.recordedDate ? w.recordedDate.toISOString() : null,
-    remarks: w.remarks || null,
-    is_recorded: w.isRecorded,
-    created_at: w.createdAt.toISOString(),
-    updated_at: w.updatedAt.toISOString(),
-  };
-}
-
-function mapDewormingFromDB(row: any): DewormingRecord {
-  return {
-    id: row.id,
-    goatId: row.goat_id,
-    dewormingDate: new Date(row.deworming_date),
-    medicineUsed: row.medicine_used,
-    batchNumber: row.batch_number || undefined,
-    administeredBy: row.administered_by,
-    remarks: row.remarks || undefined,
-    status: row.status,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function mapDewormingToDB(d: DewormingRecord): any {
-  return {
-    id: d.id,
-    goat_id: d.goatId,
-    deworming_date: d.dewormingDate.toISOString(),
-    medicine_used: d.medicineUsed,
-    batch_number: d.batchNumber || null,
-    administered_by: d.administeredBy,
-    remarks: d.remarks || null,
-    status: d.status,
-    created_at: d.createdAt.toISOString(),
-    updated_at: d.updatedAt.toISOString(),
-  };
-}
-
-function mapVaccinationFromDB(row: any): PPRVaccinationRecord {
-  return {
-    id: row.id,
-    goatId: row.goat_id,
-    vaccinationDate: new Date(row.vaccination_date),
-    vaccineBrand: row.vaccine_brand,
-    batchNumber: row.batch_number || undefined,
-    administeredBy: row.administered_by,
-    remarks: row.remarks || undefined,
-    status: row.status,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function mapVaccinationToDB(v: PPRVaccinationRecord): any {
-  return {
-    id: v.id,
-    goat_id: v.goatId,
-    vaccination_date: v.vaccinationDate.toISOString(),
-    vaccine_brand: v.vaccineBrand,
-    batch_number: v.batchNumber || null,
-    administered_by: v.administeredBy,
-    remarks: v.remarks || null,
-    status: v.status,
-    created_at: v.createdAt.toISOString(),
-    updated_at: v.updatedAt.toISOString(),
-  };
-}
-
-function mapSaleFromDB(row: any): SaleInfo {
-  return {
-    id: row.id,
-    goatId: row.goat_id,
-    saleDate: new Date(row.sale_date),
-    saleWeight: Number(row.sale_weight),
-    saleRatePerKg: Number(row.sale_rate_per_kg),
-    buyerName: row.buyer_name,
-    buyerContact: row.buyer_contact || undefined,
-    saleAmount: Number(row.sale_amount),
-    commission: row.commission ? Number(row.commission) : undefined,
-    transportCharges: row.transport_charges ? Number(row.transport_charges) : undefined,
-    otherCharges: row.other_charges ? Number(row.other_charges) : undefined,
-    netProfit: Number(row.net_profit),
-    profitPercentage: Number(row.profit_percentage),
-    remarks: row.remarks || undefined,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
-  };
-}
-
-function mapSaleToDB(s: SaleInfo): any {
-  return {
-    id: s.id,
-    goat_id: s.goatId,
-    sale_date: s.saleDate.toISOString(),
-    sale_weight: s.saleWeight,
-    sale_rate_per_kg: s.saleRatePerKg,
-    buyer_name: s.buyerName,
-    buyer_contact: s.buyerContact || null,
-    sale_amount: s.saleAmount,
-    commission: s.commission || null,
-    transport_charges: s.transportCharges || null,
-    other_charges: s.otherCharges || null,
-    net_profit: s.netProfit,
-    profit_percentage: s.profitPercentage,
-    remarks: s.remarks || null,
-    created_at: s.createdAt.toISOString(),
-    updated_at: s.updatedAt.toISOString(),
-  };
-}
-
-// --- DATABASE SERVICE ENDPOINTS ---
-
-export async function getGoat(goatId: string): Promise<Goat | null> {
-  if (useSheetsOrLocal()) {
-    // Try local IndexedDB first for speed
-    const localGoat = await indexedDB.getItem<Goat>('goats', goatId);
-    
-    // Fetch from Google Sheets in the background to update cache
-    if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (goats) => {
-        const fresh = goats.find((g) => g.id === goatId);
-        if (fresh) {
-          await indexedDB.updateItem('goats', fresh);
-        }
-      }).catch((err) => {
-        console.error('Error background fetching goat from Google Sheets:', err);
-      });
-    }
-
-    return localGoat || null;
-  }
-
-  const { data, error } = await supabase.from('goats').select('*').eq('id', goatId).maybeSingle();
-  if (error || !data) return null;
-  return mapGoatFromDB(data);
-}
-
-export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
-  if (useSheetsOrLocal()) {
-    const goats = await indexedDB.getAllItems<Goat>('goats');
-    const localMatch = goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber) || null;
-
-    // Fetch from Google Sheets in the background to update cache
-    if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (freshGoats) => {
-        for (const g of freshGoats) {
-          await indexedDB.updateItem('goats', g);
-        }
-      }).catch((err) => {
-        console.error('Error background fetching goats for ear tag check:', err);
-      });
-    }
-
-    return localMatch;
-  }
-
-  const { data, error } = await supabase
-    .from('goats')
-    .select('*')
-    .eq('farmer_id', farmerId)
-    .eq('ear_tag_number', earTagNumber)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return mapGoatFromDB(data);
-}
-
-export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
-  if (useSheetsOrLocal()) {
-    // First read from IndexedDB
-    const localGoats = await indexedDB.getAllItems<Goat>('goats');
-    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
-    if (status) {
-      filtered = filtered.filter((g) => g.status === status);
-    }
-    const sortedLocal = filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    // Trigger background update from Google Sheets
-    if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (freshGoats) => {
-        // Find existing local goats to not wipe other farmers if multi-tenant
-        const otherFarmersGoats = localGoats.filter((g) => g.farmerId !== farmerId);
-        const mergedGoats = [...otherFarmersGoats, ...freshGoats.filter((g) => g.farmerId === farmerId)];
-        
-        await indexedDB.clearStore('goats');
-        for (const g of mergedGoats) {
-          await indexedDB.updateItem('goats', g);
-        }
-      }).catch((err) => {
-        console.error('Error background updating farmer goats from Google Sheets:', err);
-      });
-    }
-
-    return sortedLocal;
-  }
-
-  let queryBuilder = supabase.from('goats').select('*').eq('farmer_id', farmerId);
-  if (status) {
-    queryBuilder = queryBuilder.eq('status', status);
-  }
-
-  const { data, error } = await queryBuilder.order('created_at', { ascending: false });
-  if (error || !data) return [];
-
-  const goats = data.map(mapGoatFromDB);
-
-  // Fetch saleInfo for sold goats to populate nested structures
-  const soldGoatIds = goats.filter((g) => g.status === 'sold').map((g) => g.id);
-  if (soldGoatIds.length > 0) {
-    const { data: salesData } = await supabase.from('sales').select('*').in('goat_id', soldGoatIds);
-    if (salesData) {
-      salesData.forEach((row) => {
-        const goat = goats.find((g) => g.id === row.goat_id);
-        if (goat) {
-          goat.saleInfo = mapSaleFromDB(row);
-        }
-      });
-    }
-  }
-
-  return goats;
-}
-
+// Goat Services
 export async function createGoat(
   farmerId: string,
   goatData: Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'status'>
@@ -378,16 +101,12 @@ export async function createGoat(
     return id;
   }
 
-  // Supabase Database insertions
-  const { error: goatErr } = await supabase.from('goats').insert(mapGoatToDB(goat));
-  if (goatErr) throw goatErr;
-
-  const { error: w0Err } = await supabase.from('weights').insert(mapWeightToDB(w0));
-  if (w0Err) throw w0Err;
-
-  const { error: placeholdersErr } = await supabase.from('weights').insert(placeholders.map(mapWeightToDB));
-  if (placeholdersErr) throw placeholdersErr;
-
+  // Firestore fallback
+  await setDoc(doc(db, 'goats', id), goat);
+  await setDoc(doc(db, 'weights', w0.id), w0);
+  for (const w of placeholders) {
+    await setDoc(doc(db, 'weights', w.id), w);
+  }
   return id;
 }
 
@@ -411,41 +130,117 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
     return;
   }
 
-  const updateData: any = {};
-  if (data.earTagNumber !== undefined) updateData.ear_tag_number = data.earTagNumber;
-  if (data.purchaseDate !== undefined) updateData.purchase_date = data.purchaseDate.toISOString();
-  if (data.purchaseWeight !== undefined) updateData.purchase_weight = data.purchaseWeight;
-  if (data.purchasePrice !== undefined) updateData.purchase_price = data.purchasePrice;
-  if (data.variant !== undefined) updateData.variant = data.variant;
-  if (data.gender !== undefined) updateData.gender = data.gender;
-  if (data.notes !== undefined) updateData.notes = data.notes;
-  if (data.photoURL !== undefined) updateData.photo_url = data.photoURL;
-  if (data.status !== undefined) updateData.status = data.status;
-  updateData.updated_at = new Date().toISOString();
+  await updateDoc(doc(db, 'goats', goatId), {
+    ...data,
+    updatedAt: new Date(),
+  });
+}
 
-  const { error } = await supabase.from('goats').update(updateData).eq('id', goatId);
-  if (error) throw error;
+export async function getGoat(goatId: string): Promise<Goat | null> {
+  if (useSheetsOrLocal()) {
+    // Try local IndexedDB first for speed
+    const localGoat = await indexedDB.getItem<Goat>('goats', goatId);
+    
+    // Fetch from Google Sheets in the background to update cache
+    if (sheetsService.isSheetsConfigured()) {
+      sheetsService.getGoatsSheet().then(async (goats) => {
+        const fresh = goats.find((g) => g.id === goatId);
+        if (fresh) {
+          await indexedDB.updateItem('goats', fresh);
+        }
+      }).catch((err) => {
+        console.error('Error background fetching goat from Google Sheets:', err);
+      });
+    }
+
+    return localGoat || null;
+  }
+
+  const snapshot = await getDoc(doc(db, 'goats', goatId));
+  return snapshot.exists() ? (snapshot.data() as Goat) : null;
+}
+
+export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
+  if (useSheetsOrLocal()) {
+    const goats = await indexedDB.getAllItems<Goat>('goats');
+    const localMatch = goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber) || null;
+
+    // Fetch from Google Sheets in the background to update cache
+    if (sheetsService.isSheetsConfigured()) {
+      sheetsService.getGoatsSheet().then(async (freshGoats) => {
+        for (const g of freshGoats) {
+          await indexedDB.updateItem('goats', g);
+        }
+      }).catch((err) => {
+        console.error('Error background fetching goats for ear tag check:', err);
+      });
+    }
+
+    return localMatch;
+  }
+
+  const q = query(
+    collection(db, 'goats'),
+    where('farmerId', '==', farmerId),
+    where('earTagNumber', '==', earTagNumber)
+  );
+
+  const snapshot = await getDocs(q);
+  return snapshot.empty ? null : (snapshot.docs[0].data() as Goat);
+}
+
+export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
+  if (useSheetsOrLocal()) {
+    // First read from IndexedDB
+    const localGoats = await indexedDB.getAllItems<Goat>('goats');
+    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
+    if (status) {
+      filtered = filtered.filter((g) => g.status === status);
+    }
+    const sortedLocal = filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Trigger background update from Google Sheets
+    if (sheetsService.isSheetsConfigured()) {
+      sheetsService.getGoatsSheet().then(async (freshGoats) => {
+        // Find existing local goats to not wipe other farmers if multi-tenant
+        const otherFarmersGoats = localGoats.filter((g) => g.farmerId !== farmerId);
+        const mergedGoats = [...otherFarmersGoats, ...freshGoats.filter((g) => g.farmerId === farmerId)];
+        
+        await indexedDB.clearStore('goats');
+        for (const g of mergedGoats) {
+          await indexedDB.updateItem('goats', g);
+        }
+      }).catch((err) => {
+        console.error('Error background updating farmer goats from Google Sheets:', err);
+      });
+    }
+
+    return sortedLocal;
+  }
+
+  let q: Query;
+  if (status) {
+    q = query(
+      collection(db, 'goats'),
+      where('farmerId', '==', farmerId),
+      where('status', '==', status),
+      orderBy('createdAt', 'desc')
+    );
+  } else {
+    q = query(
+      collection(db, 'goats'),
+      where('farmerId', '==', farmerId),
+      orderBy('createdAt', 'desc')
+    );
+  }
+
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => doc.data() as Goat);
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
   if (useSheetsOrLocal()) {
     await indexedDB.deleteItem('goats', goatId);
-    
-    // Clear weights, deworming, vaccinations associated with it locally
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
-    const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-
-    for (const w of localWeights.filter((w) => w.goatId === goatId)) {
-      await indexedDB.deleteItem('weights', w.id);
-    }
-    for (const d of localDeworm.filter((d) => d.goatId === goatId)) {
-      await indexedDB.deleteItem('deworming', d.id);
-    }
-    for (const v of localVacc.filter((v) => v.goatId === goatId)) {
-      await indexedDB.deleteItem('vaccination', v.id);
-    }
-
     if (sheetsService.isSheetsConfigured()) {
       sheetsService.deleteGoatSheet(goatId).catch((err) => {
         console.error('Error background deleting goat from Google Sheets:', err);
@@ -454,8 +249,7 @@ export async function deleteGoat(goatId: string): Promise<void> {
     return;
   }
 
-  const { error } = await supabase.from('goats').delete().eq('id', goatId);
-  if (error) throw error;
+  await deleteDoc(doc(db, 'goats', goatId));
 }
 
 // Weight Record Services
@@ -505,40 +299,39 @@ export async function recordWeight(
     }
   }
 
-  // Supabase: Find if placeholder exists
-  const { data: existing } = await supabase
-    .from('weights')
-    .select('*')
-    .eq('goat_id', goatId)
-    .eq('weight_number', weightData.weightNumber)
-    .maybeSingle();
-
-  if (existing) {
+  // Firestore fallback
+  const q = query(
+    collection(db, 'weights'),
+    where('goatId', '==', goatId),
+    where('weightNumber', '==', weightData.weightNumber)
+  );
+  const snapshot = await getDocs(q);
+  if (!snapshot.empty) {
+    const docRef = doc(db, 'weights', snapshot.docs[0].id);
+    const existingData = snapshot.docs[0].data() as WeightRecord;
     const updated = {
-      ...existing,
+      ...existingData,
       weight: weightData.weight,
-      recorded_date: weightData.recordedDate ? weightData.recordedDate.toISOString() : now.toISOString(),
-      remarks: weightData.remarks || null,
-      is_recorded: true,
-      updated_at: now.toISOString(),
-    };
-    const { error } = await supabase.from('weights').update(updated).eq('id', existing.id);
-    if (error) throw error;
-    return existing.id;
-  } else {
-    const id = generateId();
-    const record: WeightRecord = {
-      ...weightData,
-      id,
-      goatId,
+      recordedDate: weightData.recordedDate || now,
+      remarks: weightData.remarks,
       isRecorded: true,
-      createdAt: now,
       updatedAt: now,
     };
-    const { error } = await supabase.from('weights').insert(mapWeightToDB(record));
-    if (error) throw error;
-    return id;
+    await setDoc(docRef, updated);
+    return snapshot.docs[0].id;
   }
+
+  const id = generateId();
+  const record: WeightRecord = {
+    ...weightData,
+    id,
+    goatId,
+    isRecorded: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await setDoc(doc(db, 'weights', id), record);
+  return id;
 }
 
 export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
@@ -559,14 +352,14 @@ export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
     return localMatch;
   }
 
-  const { data, error } = await supabase
-    .from('weights')
-    .select('*')
-    .eq('goat_id', goatId)
-    .order('weight_number', { ascending: true });
+  const q = query(
+    collection(db, 'weights'),
+    where('goatId', '==', goatId),
+    orderBy('weightNumber', 'asc')
+  );
 
-  if (error || !data) return [];
-  return data.map(mapWeightFromDB);
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => doc.data() as WeightRecord);
 }
 
 export async function getWeightRecord(goatId: string, weightNumber: number): Promise<WeightRecord | null> {
@@ -587,15 +380,14 @@ export async function getWeightRecord(goatId: string, weightNumber: number): Pro
     return localMatch;
   }
 
-  const { data, error } = await supabase
-    .from('weights')
-    .select('*')
-    .eq('goat_id', goatId)
-    .eq('weight_number', weightNumber)
-    .maybeSingle();
+  const q = query(
+    collection(db, 'weights'),
+    where('goatId', '==', goatId),
+    where('weightNumber', '==', weightNumber)
+  );
 
-  if (error || !data) return null;
-  return mapWeightFromDB(data);
+  const snapshot = await getDocs(q);
+  return snapshot.empty ? null : (snapshot.docs[0].data() as WeightRecord);
 }
 
 // Deworming Services
@@ -624,8 +416,7 @@ export async function recordDeworming(
     return id;
   }
 
-  const { error } = await supabase.from('deworming').insert(mapDewormingToDB(record));
-  if (error) throw error;
+  await setDoc(doc(db, 'deworming', id), record);
   return id;
 }
 
@@ -647,16 +438,13 @@ export async function getGoatDeworming(goatId: string): Promise<DewormingRecord 
     return localMatch;
   }
 
-  const { data, error } = await supabase
-    .from('deworming')
-    .select('*')
-    .eq('goat_id', goatId)
-    .order('deworming_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const q = query(
+    collection(db, 'deworming'),
+    where('goatId', '==', goatId)
+  );
 
-  if (error || !data) return null;
-  return mapDewormingFromDB(data);
+  const snapshot = await getDocs(q);
+  return snapshot.empty ? null : (snapshot.docs[0].data() as DewormingRecord);
 }
 
 // PPR Vaccination Services
@@ -685,8 +473,7 @@ export async function recordVaccination(
     return id;
   }
 
-  const { error } = await supabase.from('vaccination').insert(mapVaccinationToDB(record));
-  if (error) throw error;
+  await setDoc(doc(db, 'vaccination', id), record);
   return id;
 }
 
@@ -708,16 +495,13 @@ export async function getGoatVaccination(goatId: string): Promise<PPRVaccination
     return localMatch;
   }
 
-  const { data, error } = await supabase
-    .from('vaccination')
-    .select('*')
-    .eq('goat_id', goatId)
-    .order('vaccination_date', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const q = query(
+    collection(db, 'vaccination'),
+    where('goatId', '==', goatId)
+  );
 
-  if (error || !data) return null;
-  return mapVaccinationFromDB(data);
+  const snapshot = await getDocs(q);
+  return snapshot.empty ? null : (snapshot.docs[0].data() as PPRVaccinationRecord);
 }
 
 // Sale Services
@@ -747,11 +531,16 @@ export async function recordSale(
     return id;
   }
 
-  await updateGoat(goatId, { status: 'sold' });
+  await updateGoat(goatId, { status: 'sold', saleInfo: { ...saleData, id, createdAt: now, updatedAt: now } });
 
-  const { error } = await supabase.from('sales').insert(mapSaleToDB(sale));
-  if (error) throw error;
-  
+  await setDoc(doc(db, 'sales', id), {
+    ...saleData,
+    id,
+    goatId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
   return id;
 }
 
@@ -773,14 +562,13 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
     return localMatch;
   }
 
-  const { data, error } = await supabase
-    .from('sales')
-    .select('*')
-    .eq('goat_id', goatId)
-    .maybeSingle();
+  const q = query(
+    collection(db, 'sales'),
+    where('goatId', '==', goatId)
+  );
 
-  if (error || !data) return null;
-  return mapSaleFromDB(data);
+  const snapshot = await getDocs(q);
+  return snapshot.empty ? null : (snapshot.docs[0].data() as SaleInfo);
 }
 
 // Search and filter
@@ -790,7 +578,8 @@ export async function searchGoats(farmerId: string, searchTerm: string): Promise
   return allGoats.filter(
     (goat) =>
       goat.earTagNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      goat.variant.toLowerCase().includes(searchTerm.toLowerCase())
+      goat.variant.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      goat.sellerName?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 }
 
@@ -855,10 +644,9 @@ export async function getAllDeworming(): Promise<DewormingRecord[]> {
     }
     return await indexedDB.getAllItems<DewormingRecord>('deworming');
   }
-
-  const { data, error } = await supabase.from('deworming').select('*');
-  if (error || !data) return [];
-  return data.map(mapDewormingFromDB);
+  // Firestore fallback
+  const snapshot = await getDocs(collection(db, 'deworming'));
+  return snapshot.docs.map((doc) => doc.data() as DewormingRecord);
 }
 
 export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
@@ -876,8 +664,7 @@ export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
     }
     return await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
   }
-
-  const { data, error } = await supabase.from('vaccination').select('*');
-  if (error || !data) return [];
-  return data.map(mapVaccinationFromDB);
+  // Firestore fallback
+  const snapshot = await getDocs(collection(db, 'vaccination'));
+  return snapshot.docs.map((doc) => doc.data() as PPRVaccinationRecord);
 }
