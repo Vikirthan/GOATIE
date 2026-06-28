@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -34,6 +34,14 @@ export const DashboardPage: React.FC = () => {
   const [goatsList, setGoatsList] = useState<Goat[]>([]);
   const [salesChartData, setSalesChartData] = useState<{ month: string; sales: number }[]>([]);
 
+  // Search references & states for modals
+  const vaccineRef = useRef<HTMLDivElement>(null);
+  const dewormingRef = useRef<HTMLDivElement>(null);
+  const [vaccineSearch, setVaccineSearch] = useState('');
+  const [showVaccineDropdown, setShowVaccineDropdown] = useState(false);
+  const [dewormingSearch, setDewormingSearch] = useState('');
+  const [showDewormingDropdown, setShowDewormingDropdown] = useState(false);
+
   const [stats, setStats] = useState({
     totalGoats: 0,
     activeGoats: 0,
@@ -53,18 +61,12 @@ export const DashboardPage: React.FC = () => {
 
   const [vaccineForm, setVaccineForm] = useState({
     goatId: '',
-    vaccineBrand: '',
     vaccinationDate: new Date().toISOString().split('T')[0],
-    administeredBy: '',
-    remarks: '',
   });
 
   const [dewormingForm, setDewormingForm] = useState({
     goatId: '',
-    medicineUsed: '',
     dewormingDate: new Date().toISOString().split('T')[0],
-    administeredBy: '',
-    remarks: '',
   });
 
   const [saleForm, setSaleForm] = useState({
@@ -161,6 +163,8 @@ export const DashboardPage: React.FC = () => {
         setVaccineForm((prev) => ({ ...prev, goatId: active[0].id }));
         setDewormingForm((prev) => ({ ...prev, goatId: active[0].id }));
         setSaleForm((prev) => ({ ...prev, goatId: active[0].id }));
+        setVaccineSearch(active[0].earTagNumber);
+        setDewormingSearch(active[0].earTagNumber);
       }
 
       setLoading(false); // Snappy first load render!
@@ -193,6 +197,20 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [user]);
+
+  // Click outside listener to dismiss search dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (vaccineRef.current && !vaccineRef.current.contains(event.target as Node)) {
+        setShowVaccineDropdown(false);
+      }
+      if (dewormingRef.current && !dewormingRef.current.contains(event.target as Node)) {
+        setShowDewormingDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -236,7 +254,7 @@ export const DashboardPage: React.FC = () => {
   const handleVaccineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vaccineForm.goatId) {
-      showToast('error', 'Please select a goat');
+      showToast('error', 'Please search and select a valid goat');
       return;
     }
     setSubmitting(true);
@@ -244,20 +262,15 @@ export const DashboardPage: React.FC = () => {
       await recordVaccination(vaccineForm.goatId, {
         goatId: vaccineForm.goatId,
         vaccinationDate: new Date(vaccineForm.vaccinationDate),
-        vaccineBrand: vaccineForm.vaccineBrand,
-        administeredBy: vaccineForm.administeredBy,
-        remarks: vaccineForm.remarks || undefined,
         status: 'vaccinated'
       });
       showToast('success', 'Vaccination recorded successfully');
       setShowVaccineModal(false);
       setVaccineForm({
         goatId: goatsList[0]?.id || '',
-        vaccineBrand: '',
         vaccinationDate: new Date().toISOString().split('T')[0],
-        administeredBy: '',
-        remarks: '',
       });
+      setVaccineSearch(goatsList[0]?.earTagNumber || '');
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record vaccination', error.message);
@@ -269,7 +282,7 @@ export const DashboardPage: React.FC = () => {
   const handleDewormingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dewormingForm.goatId) {
-      showToast('error', 'Please select a goat');
+      showToast('error', 'Please search and select a valid goat');
       return;
     }
     setSubmitting(true);
@@ -277,20 +290,15 @@ export const DashboardPage: React.FC = () => {
       await recordDeworming(dewormingForm.goatId, {
         goatId: dewormingForm.goatId,
         dewormingDate: new Date(dewormingForm.dewormingDate),
-        medicineUsed: dewormingForm.medicineUsed,
-        administeredBy: dewormingForm.administeredBy,
-        remarks: dewormingForm.remarks || undefined,
         status: 'dewormed'
       });
       showToast('success', 'Deworming recorded successfully');
       setShowDewormingModal(false);
       setDewormingForm({
         goatId: goatsList[0]?.id || '',
-        medicineUsed: '',
         dewormingDate: new Date().toISOString().split('T')[0],
-        administeredBy: '',
-        remarks: '',
       });
+      setDewormingSearch(goatsList[0]?.earTagNumber || '');
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record deworming', error.message);
@@ -600,25 +608,45 @@ export const DashboardPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleVaccineSubmit} className="space-y-4">
+                {/* Searchable Goat Selector */}
                 <div>
-                  <Label htmlFor="vaccineGoat">Select Goat (Ear Tag)</Label>
-                  <Select
-                    id="vaccineGoat"
-                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
-                    value={vaccineForm.goatId}
-                    onChange={(val) => setVaccineForm({ ...vaccineForm, goatId: val })}
-                  />
+                  <Label htmlFor="vaccineGoatSearch">Search Goat (Ear Tag)</Label>
+                  <div ref={vaccineRef} className="relative mt-1">
+                    <Input
+                      id="vaccineGoatSearch"
+                      placeholder="Type ear tag number..."
+                      value={vaccineSearch}
+                      onChange={(e) => {
+                        setVaccineSearch(e.target.value);
+                        setShowVaccineDropdown(true);
+                      }}
+                      onFocus={() => setShowVaccineDropdown(true)}
+                    />
+                    {showVaccineDropdown && (
+                      <div className="absolute z-10 w-full bg-card border border-input rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
+                        {goatsList
+                          .filter((g) => g.earTagNumber.toLowerCase().includes(vaccineSearch.toLowerCase()))
+                          .map((g) => (
+                            <div
+                              key={g.id}
+                              className="px-3 py-2 cursor-pointer hover:bg-accent text-sm"
+                              onClick={() => {
+                                setVaccineForm({ ...vaccineForm, goatId: g.id });
+                                setVaccineSearch(g.earTagNumber);
+                                setShowVaccineDropdown(false);
+                              }}
+                            >
+                              {g.earTagNumber} ({g.variant})
+                            </div>
+                          ))}
+                        {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(vaccineSearch.toLowerCase())).length === 0 && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">No matching goats found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="vaccineBrand">Vaccine Brand</Label>
-                  <Input
-                    id="vaccineBrand"
-                    placeholder="Enter vaccine brand/name"
-                    value={vaccineForm.vaccineBrand}
-                    onChange={(e) => setVaccineForm({ ...vaccineForm, vaccineBrand: e.target.value })}
-                    required
-                  />
-                </div>
+
                 <div>
                   <Label htmlFor="vaccineDate">Vaccination Date</Label>
                   <Input
@@ -629,25 +657,7 @@ export const DashboardPage: React.FC = () => {
                     required
                   />
                 </div>
-                <div>
-                  <Label htmlFor="vaccineAdmin">Administered By</Label>
-                  <Input
-                    id="vaccineAdmin"
-                    placeholder="Doctor or farmer name"
-                    value={vaccineForm.administeredBy}
-                    onChange={(e) => setVaccineForm({ ...vaccineForm, administeredBy: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="vaccineRemarks">Remarks</Label>
-                  <Input
-                    id="vaccineRemarks"
-                    placeholder="Optional remarks"
-                    value={vaccineForm.remarks}
-                    onChange={(e) => setVaccineForm({ ...vaccineForm, remarks: e.target.value })}
-                  />
-                </div>
+
                 <div className="flex justify-end gap-2 pt-4">
                   <Button variant="outline" type="button" onClick={() => setShowVaccineModal(false)}>
                     Cancel
@@ -672,25 +682,45 @@ export const DashboardPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleDewormingSubmit} className="space-y-4">
+                {/* Searchable Goat Selector */}
                 <div>
-                  <Label htmlFor="dewormingGoat">Select Goat (Ear Tag)</Label>
-                  <Select
-                    id="dewormingGoat"
-                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
-                    value={dewormingForm.goatId}
-                    onChange={(val) => setDewormingForm({ ...dewormingForm, goatId: val })}
-                  />
+                  <Label htmlFor="dewormingGoatSearch">Search Goat (Ear Tag)</Label>
+                  <div ref={dewormingRef} className="relative mt-1">
+                    <Input
+                      id="dewormingGoatSearch"
+                      placeholder="Type ear tag number..."
+                      value={dewormingSearch}
+                      onChange={(e) => {
+                        setDewormingSearch(e.target.value);
+                        setShowDewormingDropdown(true);
+                      }}
+                      onFocus={() => setShowDewormingDropdown(true)}
+                    />
+                    {showDewormingDropdown && (
+                      <div className="absolute z-10 w-full bg-card border border-input rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
+                        {goatsList
+                          .filter((g) => g.earTagNumber.toLowerCase().includes(dewormingSearch.toLowerCase()))
+                          .map((g) => (
+                            <div
+                              key={g.id}
+                              className="px-3 py-2 cursor-pointer hover:bg-accent text-sm"
+                              onClick={() => {
+                                setDewormingForm({ ...dewormingForm, goatId: g.id });
+                                setDewormingSearch(g.earTagNumber);
+                                setShowDewormingDropdown(false);
+                              }}
+                            >
+                              {g.earTagNumber} ({g.variant})
+                            </div>
+                          ))}
+                        {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(dewormingSearch.toLowerCase())).length === 0 && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">No matching goats found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <Label htmlFor="medicineUsed">Medicine Used</Label>
-                  <Input
-                    id="medicineUsed"
-                    placeholder="Enter medicine used"
-                    value={dewormingForm.medicineUsed}
-                    onChange={(e) => setDewormingForm({ ...dewormingForm, medicineUsed: e.target.value })}
-                    required
-                  />
-                </div>
+
                 <div>
                   <Label htmlFor="dewormingDate">Deworming Date</Label>
                   <Input
@@ -701,25 +731,7 @@ export const DashboardPage: React.FC = () => {
                     required
                   />
                 </div>
-                <div>
-                  <Label htmlFor="dewormingAdmin">Administered By</Label>
-                  <Input
-                    id="dewormingAdmin"
-                    placeholder="Doctor or farmer name"
-                    value={dewormingForm.administeredBy}
-                    onChange={(e) => setDewormingForm({ ...dewormingForm, administeredBy: e.target.value })}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="dewormingRemarks">Remarks</Label>
-                  <Input
-                    id="dewormingRemarks"
-                    placeholder="Optional remarks"
-                    value={dewormingForm.remarks}
-                    onChange={(e) => setDewormingForm({ ...dewormingForm, remarks: e.target.value })}
-                  />
-                </div>
+
                 <div className="flex justify-end gap-2 pt-4">
                   <Button variant="outline" type="button" onClick={() => setShowDewormingModal(false)}>
                     Cancel

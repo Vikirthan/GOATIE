@@ -54,9 +54,9 @@ export interface DewormingRecord {
   id: string;
   goatId: string;
   dewormingDate: Date;
-  medicineUsed: string;
+  medicineUsed?: string;
   batchNumber?: string;
-  administeredBy: string;
+  administeredBy?: string;
   remarks?: string;
   status: 'pending' | 'dewormed';
   createdAt: Date;
@@ -68,9 +68,9 @@ export interface PPRVaccinationRecord {
   id: string;
   goatId: string;
   vaccinationDate: Date;
-  vaccineBrand: string;
+  vaccineBrand?: string;
   batchNumber?: string;
-  administeredBy: string;
+  administeredBy?: string;
   remarks?: string;
   status: 'pending' | 'vaccinated';
   createdAt: Date;

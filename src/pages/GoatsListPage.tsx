@@ -164,8 +164,6 @@ export const GoatsListPage: React.FC = () => {
           await recordVaccination(goatId, {
             goatId,
             vaccinationDate: pg.purchaseDate || new Date(),
-            vaccineBrand: 'Imported',
-            administeredBy: 'Import',
             status: 'vaccinated',
           });
         }
@@ -174,8 +172,6 @@ export const GoatsListPage: React.FC = () => {
           await recordDeworming(goatId, {
             goatId,
             dewormingDate: pg.purchaseDate || new Date(),
-            medicineUsed: 'Imported',
-            administeredBy: 'Import',
             status: 'dewormed',
           });
         }
@@ -304,7 +300,7 @@ export const GoatsListPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Goats Grid */}
+      {/* Goats List */}
       {filteredGoats.length === 0 ? (
         <EmptyState
           title="No goats found"
@@ -319,77 +315,217 @@ export const GoatsListPage: React.FC = () => {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredGoats.map((goat) => (
-            <Card
-              key={goat.id}
-              className="cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => navigate(`/goats`)}
-            >
-              <CardContent className="pt-6">
-                {goat.photoURL && (
-                  <img
-                    src={goat.photoURL}
-                    alt={goat.earTagNumber}
-                    className="w-full h-40 object-cover rounded-lg mb-4"
-                  />
-                )}
+        <>
+          {/* ── Desktop Table (md+) ── */}
+          <div className="hidden md:block rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm border-b border-border">
+                    <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Ear Tag</th>
+                    <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Variant</th>
+                    <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Gender</th>
+                    <th className="text-right font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Weight</th>
+                    <th className="text-right font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Price</th>
+                    <th className="text-center font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Vaccine</th>
+                    <th className="text-center font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Deworming</th>
+                    <th className="text-center font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Status</th>
+                    <th className="text-center font-semibold text-muted-foreground px-4 py-3 w-16"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filteredGoats.map((goat, idx) => {
+                    const vaccineStatus = getGoatVaccineStatus(goat.id);
+                    const dewormStatus = getGoatDewormingStatus(goat.id);
+                    return (
+                      <tr
+                        key={goat.id}
+                        onClick={() => navigate('/goats')}
+                        className={`cursor-pointer transition-colors duration-150 hover:bg-accent/50 ${
+                          idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/25'
+                        }`}
+                      >
+                        <td className="px-4 py-3.5 font-semibold text-foreground whitespace-nowrap">
+                          {goat.earTagNumber}
+                        </td>
+                        <td className="px-4 py-3.5 text-foreground whitespace-nowrap">{goat.variant}</td>
+                        <td className="px-4 py-3.5 text-foreground whitespace-nowrap capitalize">{goat.gender}</td>
+                        <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums">
+                          {goat.purchaseWeight} <span className="text-muted-foreground text-xs">kg</span>
+                        </td>
+                        <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums font-medium">
+                          ₹{goat.purchasePrice.toLocaleString('en-IN')}
+                        </td>
 
-                <div className="space-y-2">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-bold text-lg">{goat.earTagNumber}</h3>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded ${
-                        goat.status === 'active' 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
-                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
-                      }`}>
-                        {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
-                      </span>
+                        {/* Vaccine dot */}
+                        <td className="px-4 py-3.5 text-center">
+                          <span className="inline-flex items-center gap-1.5" title={vaccineStatus}>
+                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                              vaccineStatus === 'Vaccinated'
+                                ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,.45)]'
+                                : 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,.4)]'
+                            }`} />
+                            <span className="text-xs text-muted-foreground hidden lg:inline">
+                              {vaccineStatus === 'Vaccinated' ? 'Done' : 'No'}
+                            </span>
+                          </span>
+                        </td>
+
+                        {/* Deworming dot */}
+                        <td className="px-4 py-3.5 text-center">
+                          <span className="inline-flex items-center gap-1.5" title={dewormStatus}>
+                            <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${
+                              dewormStatus === 'Dewormed'
+                                ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,.45)]'
+                                : 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,.4)]'
+                            }`} />
+                            <span className="text-xs text-muted-foreground hidden lg:inline">
+                              {dewormStatus === 'Dewormed' ? 'Done' : 'No'}
+                            </span>
+                          </span>
+                        </td>
+
+                        {/* Status pill */}
+                        <td className="px-4 py-3.5 text-center whitespace-nowrap">
+                          <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full leading-none ${
+                            goat.status === 'active'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                              : goat.status === 'sold'
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                          }`}>
+                            {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
+                          </span>
+                        </td>
+
+                        {/* Delete button */}
+                        <td className="px-4 py-3.5 text-center">
+                          <button
+                            onClick={(e) => handleDeleteGoat(e, goat.id)}
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 hover:text-white hover:bg-red-500 dark:hover:bg-red-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-1"
+                            title="Delete goat"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Row count footer */}
+            <div className="border-t border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
+              Showing {filteredGoats.length} of {goats.length} goats
+            </div>
+          </div>
+
+          {/* ── Mobile Cards (below md) ── */}
+          <div className="md:hidden space-y-3">
+            {filteredGoats.map((goat) => {
+              const vaccineStatus = getGoatVaccineStatus(goat.id);
+              const dewormStatus = getGoatDewormingStatus(goat.id);
+              return (
+                <div
+                  key={goat.id}
+                  onClick={() => navigate('/goats')}
+                  className="group relative rounded-xl border border-border bg-card shadow-sm hover:shadow-md active:scale-[0.995] transition-all duration-150 cursor-pointer overflow-hidden"
+                >
+                  {/* Top accent bar */}
+                  <div className={`absolute top-0 left-0 right-0 h-0.5 ${
+                    goat.status === 'active'
+                      ? 'bg-emerald-500'
+                      : goat.status === 'sold'
+                      ? 'bg-amber-500'
+                      : 'bg-gray-400'
+                  }`} />
+
+                  <div className="p-4 pt-5">
+                    {/* Header row: ear tag + status + delete */}
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <h3 className="text-base font-bold text-foreground truncate">
+                          {goat.earTagNumber}
+                        </h3>
+                        <span className={`shrink-0 inline-flex items-center text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full leading-none ${
+                          goat.status === 'active'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                            : goat.status === 'sold'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+                        }`}>
+                          {goat.status}
+                        </span>
+                      </div>
                       <button
                         onClick={(e) => handleDeleteGoat(e, goat.id)}
-                        className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
-                        title="Delete Goat"
+                        className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white dark:bg-red-950/30 dark:hover:bg-red-600 dark:hover:text-white transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-red-400"
+                        title="Delete goat"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                  </div>
 
-                  <p className="text-sm text-muted-foreground">
-                    {goat.variant} • {goat.gender.charAt(0).toUpperCase() + goat.gender.slice(1)}
-                  </p>
+                    {/* Info subtitle */}
+                    <p className="text-sm text-muted-foreground mb-3">
+                      {goat.variant} <span className="mx-1 opacity-40">•</span> <span className="capitalize">{goat.gender}</span>
+                    </p>
 
-                  <div className="text-sm space-y-1">
-                    <p><span className="text-muted-foreground">Weight:</span> {goat.purchaseWeight} kg</p>
-                    <p><span className="text-muted-foreground">Price:</span> ₹{goat.purchasePrice}</p>
-                    
-                    <p className="flex items-center gap-1.5 pt-1.5 border-t border-dashed border-gray-200 dark:border-gray-800 mt-2">
-                      <span className="text-muted-foreground">Vaccine:</span>
-                      <span className={`font-medium ${
-                        getGoatVaccineStatus(goat.id) === 'Vaccinated' 
-                          ? 'text-emerald-600 dark:text-emerald-400' 
-                          : 'text-red-500'
-                      }`}>
-                        {getGoatVaccineStatus(goat.id)}
+                    {/* Data grid */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
+                      <div>
+                        <span className="text-muted-foreground text-xs block mb-0.5">Weight</span>
+                        <span className="font-medium text-foreground tabular-nums">{goat.purchaseWeight} kg</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground text-xs block mb-0.5">Price</span>
+                        <span className="font-medium text-foreground tabular-nums">₹{goat.purchasePrice.toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+
+                    {/* Health status bar */}
+                    <div className="flex items-center gap-4 pt-3 border-t border-dashed border-border text-xs">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${
+                          vaccineStatus === 'Vaccinated'
+                            ? 'bg-emerald-500'
+                            : 'bg-red-500'
+                        }`} />
+                        <span className={`font-medium ${
+                          vaccineStatus === 'Vaccinated'
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-red-500 dark:text-red-400'
+                        }`}>
+                          {vaccineStatus}
+                        </span>
                       </span>
-                    </p>
-                    <p className="flex items-center gap-1.5">
-                      <span className="text-muted-foreground">Deworming:</span>
-                      <span className={`font-medium ${
-                        getGoatDewormingStatus(goat.id) === 'Dewormed' 
-                          ? 'text-blue-600 dark:text-blue-400' 
-                          : 'text-orange-500'
-                      }`}>
-                        {getGoatDewormingStatus(goat.id)}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${
+                          dewormStatus === 'Dewormed'
+                            ? 'bg-emerald-500'
+                            : 'bg-red-500'
+                        }`} />
+                        <span className={`font-medium ${
+                          dewormStatus === 'Dewormed'
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : 'text-orange-500 dark:text-orange-400'
+                        }`}>
+                          {dewormStatus}
+                        </span>
                       </span>
-                    </p>
+                    </div>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+              );
+            })}
+
+            {/* Mobile count footer */}
+            <p className="text-center text-xs text-muted-foreground pt-1 pb-2">
+              Showing {filteredGoats.length} of {goats.length} goats
+            </p>
+          </div>
+        </>
       )}
     </div>
   );
