@@ -40,20 +40,73 @@ export async function createGoat(
     updatedAt: now,
   };
 
+  // Generate weightNumber 0 (Purchase Weight, recorded immediately)
+  const purchaseDate = new Date(goat.purchaseDate);
+  const w0: WeightRecord = {
+    id: generateId(),
+    goatId: id,
+    weightNumber: 0,
+    weight: goat.purchaseWeight,
+    dueDate: purchaseDate,
+    recordedDate: purchaseDate,
+    isRecorded: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  // Helper to add months to a date
+  const addMonths = (date: Date, months: number): Date => {
+    const d = new Date(date.getTime());
+    d.setMonth(d.getMonth() + months);
+    return d;
+  };
+
+  // Generate weightNumber 1, 2, 3, 4 placeholders (unrecorded, with monthly due dates)
+  const placeholders: WeightRecord[] = [];
+  for (let m = 1; m <= 4; m++) {
+    placeholders.push({
+      id: generateId(),
+      goatId: id,
+      weightNumber: m as any,
+      weight: 0,
+      dueDate: addMonths(purchaseDate, m),
+      isRecorded: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
   if (useSheetsOrLocal()) {
     // Write locally to IndexedDB immediately
     await indexedDB.addItem('goats', goat);
+    await indexedDB.addItem('weights', w0);
+    for (const w of placeholders) {
+      await indexedDB.addItem('weights', w);
+    }
     
     // Sync with Google Sheets in the background
     if (sheetsService.isSheetsConfigured()) {
       sheetsService.writeGoatSheet(goat).catch((err) => {
         console.error('Error background syncing createGoat to Google Sheets:', err);
       });
+      sheetsService.writeWeightSheet(w0).catch((err) => {
+        console.error('Error background syncing weight 0 to Google Sheets:', err);
+      });
+      for (const w of placeholders) {
+        sheetsService.writeWeightSheet(w).catch((err) => {
+          console.error('Error background syncing placeholder weights to Google Sheets:', err);
+        });
+      }
     }
     return id;
   }
 
+  // Firestore fallback
   await setDoc(doc(db, 'goats', id), goat);
+  await setDoc(doc(db, 'weights', w0.id), w0);
+  for (const w of placeholders) {
+    await setDoc(doc(db, 'weights', w.id), w);
+  }
   return id;
 }
 
@@ -204,8 +257,71 @@ export async function recordWeight(
   goatId: string,
   weightData: Omit<WeightRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
-  const id = generateId();
   const now = new Date();
+
+  if (useSheetsOrLocal()) {
+    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+    const existing = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightData.weightNumber);
+
+    if (existing) {
+      const updated = {
+        ...existing,
+        weight: weightData.weight,
+        recordedDate: weightData.recordedDate || now,
+        remarks: weightData.remarks,
+        isRecorded: true,
+        updatedAt: now,
+      };
+      await indexedDB.updateItem('weights', updated);
+      if (sheetsService.isSheetsConfigured()) {
+        sheetsService.updateWeightSheet(updated).catch((err) => {
+          console.error('Error background updating weight to Google Sheets:', err);
+        });
+      }
+      return existing.id;
+    } else {
+      const id = generateId();
+      const record: WeightRecord = {
+        ...weightData,
+        id,
+        goatId,
+        isRecorded: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await indexedDB.addItem('weights', record);
+      if (sheetsService.isSheetsConfigured()) {
+        sheetsService.writeWeightSheet(record).catch((err) => {
+          console.error('Error background syncing weight to Google Sheets:', err);
+        });
+      }
+      return id;
+    }
+  }
+
+  // Firestore fallback
+  const q = query(
+    collection(db, 'weights'),
+    where('goatId', '==', goatId),
+    where('weightNumber', '==', weightData.weightNumber)
+  );
+  const snapshot = await getDocs(q);
+  if (!snapshot.empty) {
+    const docRef = doc(db, 'weights', snapshot.docs[0].id);
+    const existingData = snapshot.docs[0].data() as WeightRecord;
+    const updated = {
+      ...existingData,
+      weight: weightData.weight,
+      recordedDate: weightData.recordedDate || now,
+      remarks: weightData.remarks,
+      isRecorded: true,
+      updatedAt: now,
+    };
+    await setDoc(docRef, updated);
+    return snapshot.docs[0].id;
+  }
+
+  const id = generateId();
   const record: WeightRecord = {
     ...weightData,
     id,
@@ -214,17 +330,6 @@ export async function recordWeight(
     createdAt: now,
     updatedAt: now,
   };
-
-  if (useSheetsOrLocal()) {
-    await indexedDB.addItem('weights', record);
-    if (sheetsService.isSheetsConfigured()) {
-      sheetsService.writeWeightSheet(record).catch((err) => {
-        console.error('Error background syncing weight to Google Sheets:', err);
-      });
-    }
-    return id;
-  }
-
   await setDoc(doc(db, 'weights', id), record);
   return id;
 }

@@ -15,7 +15,8 @@ import {
   getPendingDeworming,
   getPendingVaccination,
   recordVaccination,
-  recordDeworming
+  recordDeworming,
+  recordWeight
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord } from '@/types';
@@ -25,6 +26,7 @@ export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [showWeightModal, setShowWeightModal] = useState(false);
   const [showVaccineModal, setShowVaccineModal] = useState(false);
   const [showDewormingModal, setShowDewormingModal] = useState(false);
   const [goatsList, setGoatsList] = useState<Goat[]>([]);
@@ -36,6 +38,14 @@ export const DashboardPage: React.FC = () => {
     weightDue: 0,
     pendingDeworming: 0,
     pendingVaccination: 0,
+  });
+
+  const [weightForm, setWeightForm] = useState({
+    goatId: '',
+    weightNumber: '1',
+    weight: '',
+    recordedDate: new Date().toISOString().split('T')[0],
+    remarks: '',
   });
 
   const [vaccineForm, setVaccineForm] = useState({
@@ -95,6 +105,7 @@ export const DashboardPage: React.FC = () => {
       setGoatsList(active);
 
       if (active.length > 0) {
+        setWeightForm((prev) => ({ ...prev, goatId: active[0].id }));
         setVaccineForm((prev) => ({ ...prev, goatId: active[0].id }));
         setDewormingForm((prev) => ({ ...prev, goatId: active[0].id }));
       }
@@ -128,6 +139,45 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [user]);
+
+  const handleWeightSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!weightForm.goatId) {
+      showToast('error', 'Please select a goat');
+      return;
+    }
+    const parsedWeight = parseFloat(weightForm.weight);
+    if (isNaN(parsedWeight) || parsedWeight <= 0) {
+      showToast('error', 'Please enter a valid weight');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await recordWeight(weightForm.goatId, {
+        goatId: weightForm.goatId,
+        weightNumber: parseInt(weightForm.weightNumber) as any,
+        weight: parsedWeight,
+        dueDate: new Date(), // overridden by existing placeholder in recordWeight
+        recordedDate: new Date(weightForm.recordedDate),
+        remarks: weightForm.remarks || undefined,
+        isRecorded: true
+      });
+      showToast('success', 'Weight recorded successfully');
+      setShowWeightModal(false);
+      setWeightForm({
+        goatId: goatsList[0]?.id || '',
+        weightNumber: '1',
+        weight: '',
+        recordedDate: new Date().toISOString().split('T')[0],
+        remarks: '',
+      });
+      loadData();
+    } catch (error: any) {
+      showToast('error', 'Failed to record weight', error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const handleVaccineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -295,7 +345,8 @@ export const DashboardPage: React.FC = () => {
           variant="secondary"
           size="md"
           className="w-full h-12"
-          onClick={() => navigate('/goats')}
+          onClick={() => setShowWeightModal(true)}
+          disabled={goatsList.length === 0}
         >
           Record Weight
         </Button>
@@ -326,6 +377,84 @@ export const DashboardPage: React.FC = () => {
           View All Goats
         </Button>
       </div>
+
+      {/* Weight Modal */}
+      {showWeightModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <CardTitle>Record Weight</CardTitle>
+              <CardDescription>Enter monthly weight recording details</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleWeightSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="weightGoat">Select Goat (Ear Tag)</Label>
+                  <Select
+                    id="weightGoat"
+                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
+                    value={weightForm.goatId}
+                    onChange={(val) => setWeightForm({ ...weightForm, goatId: val })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="weightNumber">Select Month</Label>
+                  <Select
+                    id="weightNumber"
+                    options={[
+                      { value: '1', label: '1st Month' },
+                      { value: '2', label: '2nd Month' },
+                      { value: '3', label: '3rd Month' },
+                      { value: '4', label: '4th Month' }
+                    ]}
+                    value={weightForm.weightNumber}
+                    onChange={(val) => setWeightForm({ ...weightForm, weightNumber: val })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="weight">Weight (kg)</Label>
+                  <Input
+                    id="weight"
+                    type="number"
+                    step="0.01"
+                    placeholder="Enter weight in kg"
+                    value={weightForm.weight}
+                    onChange={(e) => setWeightForm({ ...weightForm, weight: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="recordedDate">Date Recorded</Label>
+                  <Input
+                    id="recordedDate"
+                    type="date"
+                    value={weightForm.recordedDate}
+                    onChange={(e) => setWeightForm({ ...weightForm, recordedDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="weightRemarks">Remarks</Label>
+                  <Input
+                    id="weightRemarks"
+                    placeholder="Optional remarks"
+                    value={weightForm.remarks}
+                    onChange={(e) => setWeightForm({ ...weightForm, remarks: e.target.value })}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button variant="outline" type="button" onClick={() => setShowWeightModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>
+                    Record Weight
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Vaccine Modal */}
       {showVaccineModal && (
