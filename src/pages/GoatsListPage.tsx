@@ -12,11 +12,12 @@ import {
   getAllVaccinations,
   recordVaccination,
   recordDeworming,
-  recordSale
+  recordSale,
+  deleteGoat
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
-import { Plus, Search, Download, Upload } from 'lucide-react';
+import { Plus, Search, Download, Upload, Trash2 } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { exportGoatsToExcel, importGoatsFromExcel } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
@@ -35,6 +36,20 @@ export const GoatsListPage: React.FC = () => {
   const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDeleteGoat = async (e: React.MouseEvent, goatId: string) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this goat entry? This cannot be undone.')) {
+      return;
+    }
+    try {
+      await deleteGoat(goatId);
+      showToast('success', 'Goat deleted successfully');
+      loadGoatsList();
+    } catch (err: any) {
+      showToast('error', 'Failed to delete goat', err.message);
+    }
+  };
 
   const loadGoatsList = async () => {
     if (!user) return;
@@ -323,13 +338,22 @@ export const GoatsListPage: React.FC = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-start">
                     <h3 className="font-bold text-lg">{goat.earTagNumber}</h3>
-                    <span className={`text-xs font-semibold px-2 py-1 rounded ${
-                      goat.status === 'active' 
-                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
-                        : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
-                    }`}>
-                      {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-semibold px-2 py-1 rounded ${
+                        goat.status === 'active' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
+                      }`}>
+                        {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
+                      </span>
+                      <button
+                        onClick={(e) => handleDeleteGoat(e, goat.id)}
+                        className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded transition-colors"
+                        title="Delete Goat"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-sm text-muted-foreground">
