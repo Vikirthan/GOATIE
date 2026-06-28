@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs';
 import { Goat } from '@/types';
 
-// Exact column headers based on UI language
+// Exact column headers based on UI language (Seller details removed)
 const COLUMNS = {
   earTagNumber: 'Goat Number (Ear Tag)',
   variant: 'Variant/Breed',
@@ -10,8 +10,6 @@ const COLUMNS = {
   purchaseWeight: 'Purchase Weight (kg)',
   purchasePrice: 'Purchase Price (₹)',
   age: 'Age (months)',
-  sellerName: 'Seller Name',
-  sellerContact: 'Seller Contact',
   notes: 'Notes',
   status: 'Status'
 };
@@ -30,8 +28,6 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
     { header: COLUMNS.purchaseWeight, key: 'purchaseWeight', width: 22 },
     { header: COLUMNS.purchasePrice, key: 'purchasePrice', width: 20 },
     { header: COLUMNS.age, key: 'age', width: 15 },
-    { header: COLUMNS.sellerName, key: 'sellerName', width: 20 },
-    { header: COLUMNS.sellerContact, key: 'sellerContact', width: 20 },
     { header: COLUMNS.notes, key: 'notes', width: 30 },
     { header: COLUMNS.status, key: 'status', width: 15 }
   ];
@@ -46,8 +42,6 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
       purchaseWeight: goat.purchaseWeight,
       purchasePrice: goat.purchasePrice,
       age: goat.age || '',
-      sellerName: goat.sellerName,
-      sellerContact: goat.sellerContact || '',
       notes: goat.notes || '',
       status: goat.status
     });
@@ -101,15 +95,14 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
           }
         });
 
-        // Validate necessary columns exist (at least Goat Number, Variant, Gender, Purchase Weight, Purchase Price, Seller Name)
+        // Validate necessary columns exist (at least Goat Number, Variant, Gender, Purchase Weight, Purchase Price)
         const requiredFields = [
           COLUMNS.earTagNumber,
           COLUMNS.variant,
           COLUMNS.gender,
           COLUMNS.purchaseDate,
           COLUMNS.purchaseWeight,
-          COLUMNS.purchasePrice,
-          COLUMNS.sellerName
+          COLUMNS.purchasePrice
         ];
 
         for (const field of requiredFields) {
@@ -157,8 +150,6 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
           const purchaseWeight = parseFloat(getCellVal(COLUMNS.purchaseWeight)?.toString() || '0');
           const purchasePrice = parseFloat(getCellVal(COLUMNS.purchasePrice)?.toString() || '0');
           const age = parseInt(getCellVal(COLUMNS.age)?.toString() || '') || undefined;
-          const sellerName = getCellVal(COLUMNS.sellerName)?.toString().trim() || '';
-          const sellerContact = getCellVal(COLUMNS.sellerContact)?.toString().trim() || undefined;
           const notes = getCellVal(COLUMNS.notes)?.toString().trim() || undefined;
 
           let status = getCellVal(COLUMNS.status)?.toString().trim().toLowerCase();
@@ -174,8 +165,7 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
             purchaseWeight,
             purchasePrice,
             age,
-            sellerName,
-            sellerContact,
+            sellerName: 'N/A', // Omitted from Excel sheet but defaulted here for DB schema compatibility
             notes,
             status: status as 'active' | 'sold' | 'deceased'
           });

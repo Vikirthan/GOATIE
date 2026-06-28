@@ -83,8 +83,7 @@ export const GoatRegistrationPage: React.FC = () => {
         gender: formData.gender as 'male' | 'female',
         age: parseInt(formData.age) || undefined,
         purchasePrice: parseFloat(formData.purchasePrice),
-        sellerName: formData.sellerName,
-        sellerContact: formData.sellerContact || undefined,
+        sellerName: 'N/A',
         notes: formData.notes || undefined,
         photoURL: formData.photo || undefined,
         qrCode,
@@ -210,31 +209,7 @@ export const GoatRegistrationPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Seller Details */}
-            <div className="space-y-4">
-              <h2 className="font-semibold">Seller Details</h2>
 
-              <div>
-                <Label htmlFor="sellerName">Seller Name</Label>
-                <Input
-                  id="sellerName"
-                  placeholder="Enter seller name"
-                  value={formData.sellerName}
-                  onChange={(e) => setFormData({ ...formData, sellerName: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="sellerContact">Seller Contact</Label>
-                <Input
-                  id="sellerContact"
-                  placeholder="Phone or email"
-                  value={formData.sellerContact}
-                  onChange={(e) => setFormData({ ...formData, sellerContact: e.target.value })}
-                />
-              </div>
-            </div>
 
             {/* Additional */}
             <div className="space-y-4">

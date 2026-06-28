@@ -100,31 +100,19 @@ export function getCachedLanguages(): Language[] | null {
 }
 
 const DEFAULT_VARIANTS: GoatVariant[] = [
-  { id: 'variant_0', code: 'BOER', name: 'Boer', description: 'Boer goat breed' },
-  { id: 'variant_1', code: 'JAMUNAPARI', name: 'Jamunapari', description: 'Jamunapari goat breed' },
-  { id: 'variant_2', code: 'SIROHI', name: 'Sirohi', description: 'Sirohi goat breed' },
-  { id: 'variant_3', code: 'BARBARI', name: 'Barbari', description: 'Barbari goat breed' },
-  { id: 'variant_4', code: 'BEETAL', name: 'Beetal', description: 'Beetal goat breed' },
-  { id: 'variant_5', code: 'LOCAL', name: 'Local/Desi', description: 'Local goat breed' },
+  { id: 'variant_0', code: 'VELLADU', name: 'வெள்ளாடு', description: 'வெள்ளாடு' },
+  { id: 'variant_1', code: 'SEMMARI', name: 'செம்மறி', description: 'செம்மறி' },
 ];
 
 // Get variants with caching
 export async function getGoatVariants(): Promise<GoatVariant[]> {
-  const cached = getCachedVariants();
-  if (cached && cached.length > 0) return cached;
-
-  const variants = await fetchGoatVariants();
-  if (variants.length > 0) {
-    cacheVariants(variants);
-    return variants;
-  }
   return DEFAULT_VARIANTS;
 }
 
 // Get languages with caching
 export async function getLanguages(): Promise<Language[]> {
   const cached = getCachedLanguages();
-  if (cached) return cached;
+  if (cached && cached.length > 0) return cached;
 
   const languages = await fetchLanguages();
   if (languages.length > 0) {
