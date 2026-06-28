@@ -3,9 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
+import { Select } from '@/components/ui/Select';
 import { LoadingSpinner } from '@/components/common/Loaders';
+import { showToast } from '@/components/common/Toast';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { getFarmerGoats, getGoatsDueForWeight, getPendingDeworming, getPendingVaccination } from '@/services/firebaseService';
+import {
+  getFarmerGoats,
+  getGoatsDueForWeight,
+  getPendingDeworming,
+  getPendingVaccination,
+  recordVaccination,
+  recordDeworming
+} from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord } from '@/types';
 
@@ -13,6 +24,11 @@ export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showVaccineModal, setShowVaccineModal] = useState(false);
+  const [showDewormingModal, setShowDewormingModal] = useState(false);
+  const [goatsList, setGoatsList] = useState<Goat[]>([]);
+
   const [stats, setStats] = useState({
     totalGoats: 0,
     activeGoats: 0,
@@ -20,6 +36,22 @@ export const DashboardPage: React.FC = () => {
     weightDue: 0,
     pendingDeworming: 0,
     pendingVaccination: 0,
+  });
+
+  const [vaccineForm, setVaccineForm] = useState({
+    goatId: '',
+    vaccineBrand: '',
+    vaccinationDate: new Date().toISOString().split('T')[0],
+    administeredBy: '',
+    remarks: '',
+  });
+
+  const [dewormingForm, setDewormingForm] = useState({
+    goatId: '',
+    medicineUsed: '',
+    dewormingDate: new Date().toISOString().split('T')[0],
+    administeredBy: '',
+    remarks: '',
   });
 
   const loadData = async () => {
@@ -60,6 +92,13 @@ export const DashboardPage: React.FC = () => {
         pendingDeworming: pendingDewormingCount,
         pendingVaccination: pendingVaccinationCount,
       });
+      setGoatsList(active);
+
+      if (active.length > 0) {
+        setVaccineForm((prev) => ({ ...prev, goatId: active[0].id }));
+        setDewormingForm((prev) => ({ ...prev, goatId: active[0].id }));
+      }
+
       setLoading(false); // Snappy first load render!
 
       // 2. Fetch fresh data in background from Sheets/Firestore
@@ -78,6 +117,7 @@ export const DashboardPage: React.FC = () => {
         pendingDeworming: deworm.length,
         pendingVaccination: vacc.length,
       });
+      setGoatsList(freshActive);
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
     } finally {
@@ -88,6 +128,72 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [user]);
+
+  const handleVaccineSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vaccineForm.goatId) {
+      showToast('error', 'Please select a goat');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await recordVaccination(vaccineForm.goatId, {
+        goatId: vaccineForm.goatId,
+        vaccinationDate: new Date(vaccineForm.vaccinationDate),
+        vaccineBrand: vaccineForm.vaccineBrand,
+        administeredBy: vaccineForm.administeredBy,
+        remarks: vaccineForm.remarks || undefined,
+        status: 'vaccinated'
+      });
+      showToast('success', 'Vaccination recorded successfully');
+      setShowVaccineModal(false);
+      setVaccineForm({
+        goatId: goatsList[0]?.id || '',
+        vaccineBrand: '',
+        vaccinationDate: new Date().toISOString().split('T')[0],
+        administeredBy: '',
+        remarks: '',
+      });
+      loadData();
+    } catch (error: any) {
+      showToast('error', 'Failed to record vaccination', error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDewormingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dewormingForm.goatId) {
+      showToast('error', 'Please select a goat');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await recordDeworming(dewormingForm.goatId, {
+        goatId: dewormingForm.goatId,
+        dewormingDate: new Date(dewormingForm.dewormingDate),
+        medicineUsed: dewormingForm.medicineUsed,
+        administeredBy: dewormingForm.administeredBy,
+        remarks: dewormingForm.remarks || undefined,
+        status: 'dewormed'
+      });
+      showToast('success', 'Deworming recorded successfully');
+      setShowDewormingModal(false);
+      setDewormingForm({
+        goatId: goatsList[0]?.id || '',
+        medicineUsed: '',
+        dewormingDate: new Date().toISOString().split('T')[0],
+        administeredBy: '',
+        remarks: '',
+      });
+      loadData();
+    } catch (error: any) {
+      showToast('error', 'Failed to record deworming', error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) return <LoadingSpinner message="Loading dashboard..." />;
 
@@ -101,7 +207,7 @@ export const DashboardPage: React.FC = () => {
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 relative">
       <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground">Welcome back, {user?.displayName}</p>
@@ -176,10 +282,10 @@ export const DashboardPage: React.FC = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Button
           variant="primary"
-          size="lg"
+          size="md"
           className="w-full h-12"
           onClick={() => navigate('/goats/register')}
         >
@@ -187,7 +293,7 @@ export const DashboardPage: React.FC = () => {
         </Button>
         <Button
           variant="secondary"
-          size="lg"
+          size="md"
           className="w-full h-12"
           onClick={() => navigate('/goats')}
         >
@@ -195,13 +301,175 @@ export const DashboardPage: React.FC = () => {
         </Button>
         <Button
           variant="outline"
-          size="lg"
+          size="md"
+          className="w-full h-12 text-emerald-600 border-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-400"
+          onClick={() => setShowVaccineModal(true)}
+          disabled={goatsList.length === 0}
+        >
+          Log Vaccine
+        </Button>
+        <Button
+          variant="outline"
+          size="md"
+          className="w-full h-12 text-blue-600 border-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-400"
+          onClick={() => setShowDewormingModal(true)}
+          disabled={goatsList.length === 0}
+        >
+          Log Deworming
+        </Button>
+        <Button
+          variant="outline"
+          size="md"
           className="w-full h-12"
           onClick={() => navigate('/goats')}
         >
           View All Goats
         </Button>
       </div>
+
+      {/* Vaccine Modal */}
+      {showVaccineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <CardTitle>Log Vaccine</CardTitle>
+              <CardDescription>Record a vaccination entry for a goat</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleVaccineSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="vaccineGoat">Select Goat (Ear Tag)</Label>
+                  <Select
+                    id="vaccineGoat"
+                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
+                    value={vaccineForm.goatId}
+                    onChange={(val) => setVaccineForm({ ...vaccineForm, goatId: val })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="vaccineBrand">Vaccine Brand</Label>
+                  <Input
+                    id="vaccineBrand"
+                    placeholder="Enter vaccine brand/name"
+                    value={vaccineForm.vaccineBrand}
+                    onChange={(e) => setVaccineForm({ ...vaccineForm, vaccineBrand: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="vaccineDate">Vaccination Date</Label>
+                  <Input
+                    id="vaccineDate"
+                    type="date"
+                    value={vaccineForm.vaccinationDate}
+                    onChange={(e) => setVaccineForm({ ...vaccineForm, vaccinationDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="vaccineAdmin">Administered By</Label>
+                  <Input
+                    id="vaccineAdmin"
+                    placeholder="Doctor or farmer name"
+                    value={vaccineForm.administeredBy}
+                    onChange={(e) => setVaccineForm({ ...vaccineForm, administeredBy: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="vaccineRemarks">Remarks</Label>
+                  <Input
+                    id="vaccineRemarks"
+                    placeholder="Optional remarks"
+                    value={vaccineForm.remarks}
+                    onChange={(e) => setVaccineForm({ ...vaccineForm, remarks: e.target.value })}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button variant="outline" type="button" onClick={() => setShowVaccineModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>
+                    Log Vaccine
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Deworming Modal */}
+      {showDewormingModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <CardTitle>Log Deworming</CardTitle>
+              <CardDescription>Record a deworming entry for a goat</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleDewormingSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="dewormingGoat">Select Goat (Ear Tag)</Label>
+                  <Select
+                    id="dewormingGoat"
+                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
+                    value={dewormingForm.goatId}
+                    onChange={(val) => setDewormingForm({ ...dewormingForm, goatId: val })}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="medicineUsed">Medicine Used</Label>
+                  <Input
+                    id="medicineUsed"
+                    placeholder="Enter medicine used"
+                    value={dewormingForm.medicineUsed}
+                    onChange={(e) => setDewormingForm({ ...dewormingForm, medicineUsed: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="dewormingDate">Deworming Date</Label>
+                  <Input
+                    id="dewormingDate"
+                    type="date"
+                    value={dewormingForm.dewormingDate}
+                    onChange={(e) => setDewormingForm({ ...dewormingForm, dewormingDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="dewormingAdmin">Administered By</Label>
+                  <Input
+                    id="dewormingAdmin"
+                    placeholder="Doctor or farmer name"
+                    value={dewormingForm.administeredBy}
+                    onChange={(e) => setDewormingForm({ ...dewormingForm, administeredBy: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="dewormingRemarks">Remarks</Label>
+                  <Input
+                    id="dewormingRemarks"
+                    placeholder="Optional remarks"
+                    value={dewormingForm.remarks}
+                    onChange={(e) => setDewormingForm({ ...dewormingForm, remarks: e.target.value })}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button variant="outline" type="button" onClick={() => setShowDewormingModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>
+                    Log Deworming
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 };

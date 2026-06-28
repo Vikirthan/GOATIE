@@ -4,8 +4,15 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { LoadingSpinner, EmptyState } from '@/components/common/Loaders';
 import { useAuth } from '@/context/AuthContext';
-import { getFarmerGoats, createGoat, getGoatByEarTag } from '@/services/firebaseService';
-import { Goat } from '@/types';
+import {
+  getFarmerGoats,
+  createGoat,
+  getGoatByEarTag,
+  getAllDeworming,
+  getAllVaccinations
+} from '@/services/firebaseService';
+import * as indexedDB from '@/lib/indexeddb';
+import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
 import { Plus, Search, Download, Upload } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { exportGoatsToExcel, importGoatsFromExcel } from '@/utils/excelHelper';
@@ -21,14 +28,39 @@ export const GoatsListPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'sold'>('all');
+  const [dewormingRecords, setDewormingRecords] = useState<DewormingRecord[]>([]);
+  const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadGoatsList = async () => {
     if (!user) return;
     try {
-      const data = await getFarmerGoats(user.id);
-      setGoats(data);
+      // 1. Instant local load
+      const localGoats = await indexedDB.getAllItems<Goat>('goats');
+      const filteredLocal = localGoats
+        .filter((g) => g.farmerId === user.id)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
+      const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+
+      setDewormingRecords(localDeworm);
+      setVaccineRecords(localVacc);
+
+      if (filteredLocal.length > 0) {
+        setGoats(filteredLocal);
+        setLoading(false);
+      }
+
+      // 2. Background fresh load
+      const freshGoats = await getFarmerGoats(user.id);
+      const freshDeworm = await getAllDeworming();
+      const freshVacc = await getAllVaccinations();
+
+      setGoats(freshGoats);
+      setDewormingRecords(freshDeworm);
+      setVaccineRecords(freshVacc);
     } catch (error) {
       console.error('Error loading goats:', error);
     } finally {
@@ -50,8 +82,7 @@ export const GoatsListPage: React.FC = () => {
     if (searchTerm) {
       result = result.filter((g) =>
         g.earTagNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        g.variant.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        g.sellerName?.toLowerCase().includes(searchTerm.toLowerCase())
+        g.variant.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -122,6 +153,16 @@ export const GoatsListPage: React.FC = () => {
     }
   };
 
+  const getGoatVaccineStatus = (goatId: string): string => {
+    const record = vaccineRecords.find((r) => r.goatId === goatId);
+    return record ? 'Vaccinated' : 'Unvaccinated';
+  };
+
+  const getGoatDewormingStatus = (goatId: string): string => {
+    const record = dewormingRecords.find((r) => r.goatId === goatId);
+    return record ? 'Dewormed' : 'Not done';
+  };
+
   if (loading) return <LoadingSpinner message="Loading goats..." />;
 
   return (
@@ -174,7 +215,7 @@ export const GoatsListPage: React.FC = () => {
         <div className="relative">
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by ear tag, variant, or seller..."
+            placeholder="Search by ear tag or variant..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10"
@@ -216,7 +257,7 @@ export const GoatsListPage: React.FC = () => {
             <Card
               key={goat.id}
               className="cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => navigate(`/goats/${goat.id}`)}
+              onClick={() => navigate(`/goats`)}
             >
               <CardContent className="pt-6">
                 {goat.photoURL && (
@@ -244,8 +285,29 @@ export const GoatsListPage: React.FC = () => {
                   </p>
 
                   <div className="text-sm space-y-1">
-                    <p>Weight: {goat.purchaseWeight} kg</p>
-                    <p>Price: ₹{goat.purchasePrice}</p>
+                    <p><span className="text-muted-foreground">Weight:</span> {goat.purchaseWeight} kg</p>
+                    <p><span className="text-muted-foreground">Price:</span> ₹{goat.purchasePrice}</p>
+                    
+                    <p className="flex items-center gap-1.5 pt-1.5 border-t border-dashed border-gray-200 dark:border-gray-800 mt-2">
+                      <span className="text-muted-foreground">Vaccine:</span>
+                      <span className={`font-medium ${
+                        getGoatVaccineStatus(goat.id) === 'Vaccinated' 
+                          ? 'text-emerald-600 dark:text-emerald-400' 
+                          : 'text-red-500'
+                      }`}>
+                        {getGoatVaccineStatus(goat.id)}
+                      </span>
+                    </p>
+                    <p className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground">Deworming:</span>
+                      <span className={`font-medium ${
+                        getGoatDewormingStatus(goat.id) === 'Dewormed' 
+                          ? 'text-blue-600 dark:text-blue-400' 
+                          : 'text-orange-500'
+                      }`}>
+                        {getGoatDewormingStatus(goat.id)}
+                      </span>
+                    </p>
                   </div>
                 </div>
               </CardContent>

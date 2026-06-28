@@ -523,3 +523,43 @@ export async function getPendingVaccination(farmerId: string): Promise<Goat[]> {
 
   return pending;
 }
+
+export async function getAllDeworming(): Promise<DewormingRecord[]> {
+  if (useSheetsOrLocal()) {
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        const data = await sheetsService.getDewormingSheet();
+        for (const r of data) {
+          await indexedDB.updateItem('deworming', r);
+        }
+        return data;
+      } catch (err) {
+        console.error('Error fetching deworming sheet:', err);
+      }
+    }
+    return await indexedDB.getAllItems<DewormingRecord>('deworming');
+  }
+  // Firestore fallback
+  const snapshot = await getDocs(collection(db, 'deworming'));
+  return snapshot.docs.map((doc) => doc.data() as DewormingRecord);
+}
+
+export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
+  if (useSheetsOrLocal()) {
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        const data = await sheetsService.getVaccinationSheet();
+        for (const r of data) {
+          await indexedDB.updateItem('vaccination', r);
+        }
+        return data;
+      } catch (err) {
+        console.error('Error fetching vaccination sheet:', err);
+      }
+    }
+    return await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+  }
+  // Firestore fallback
+  const snapshot = await getDocs(collection(db, 'vaccination'));
+  return snapshot.docs.map((doc) => doc.data() as PPRVaccinationRecord);
+}
