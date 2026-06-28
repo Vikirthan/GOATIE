@@ -1,8 +1,8 @@
 import ExcelJS from 'exceljs';
-import { Goat } from '@/types';
+import { Goat, SaleInfo } from '@/types';
 import { getAllDeworming, getAllVaccinations } from '@/services/firebaseService';
 
-// Exact column headers including Vaccine and Deworming
+// Exact column headers including Vaccine, Deworming and Sold details
 const COLUMNS = {
   earTagNumber: 'Goat Number (Ear Tag)',
   variant: 'Variant/Breed',
@@ -12,6 +12,11 @@ const COLUMNS = {
   purchasePrice: 'Purchase Price (₹)',
   vaccination: 'Vaccination',
   deworming: 'Deworming',
+  buyerName: 'Buyer Name',
+  saleWeight: 'Sale Weight (kg)',
+  saleRatePerKg: 'Sale Rate (₹/kg)',
+  saleAmount: 'Sale Amount (₹)',
+  netProfit: 'Net Profit (₹)',
   notes: 'Notes',
   status: 'Status'
 };
@@ -19,6 +24,12 @@ const COLUMNS = {
 export interface ImportedGoatData extends Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'qrCode' | 'barcode'> {
   vaccinationStatus?: 'vaccinated' | 'unvaccinated';
   dewormingStatus?: 'dewormed' | 'not done';
+  buyerName?: string;
+  buyerContact?: string;
+  saleWeight?: number;
+  saleRatePerKg?: number;
+  saleDate?: Date;
+  remarks?: string;
 }
 
 // Export Goats to Excel
@@ -36,16 +47,41 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
     { header: COLUMNS.purchasePrice, key: 'purchasePrice', width: 20 },
     { header: COLUMNS.vaccination, key: 'vaccination', width: 18 },
     { header: COLUMNS.deworming, key: 'deworming', width: 18 },
+    { header: COLUMNS.buyerName, key: 'buyerName', width: 20 },
+    { header: COLUMNS.saleWeight, key: 'saleWeight', width: 20 },
+    { header: COLUMNS.saleRatePerKg, key: 'saleRatePerKg', width: 20 },
+    { header: COLUMNS.saleAmount, key: 'saleAmount', width: 20 },
+    { header: COLUMNS.netProfit, key: 'netProfit', width: 20 },
     { header: COLUMNS.notes, key: 'notes', width: 30 },
     { header: COLUMNS.status, key: 'status', width: 15 }
   ];
 
-  // Fetch deworming and vaccinations
+  // Fetch deworming, vaccinations and sales
   let dewormingRecords: any[] = [];
   let vaccineRecords: any[] = [];
+  let saleRecords: any[] = [];
   try {
     dewormingRecords = await getAllDeworming();
     vaccineRecords = await getAllVaccinations();
+    
+    // Dynamic import to resolve sales data
+    const sheetsService = await import('@/services/sheetsStorageService');
+    const indexedDB = await import('@/lib/indexeddb');
+    
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        saleRecords = await sheetsService.getSalesSheet();
+        for (const s of saleRecords) {
+          await indexedDB.updateItem('sales', s);
+        }
+      } catch (err) {
+        console.error('Error fetching sales from sheet:', err);
+      }
+    }
+    
+    if (saleRecords.length === 0) {
+      saleRecords = await indexedDB.getAllItems<SaleInfo>('sales');
+    }
   } catch (err) {
     console.error('Error fetching records for Excel export:', err);
   }
@@ -54,6 +90,7 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
   goats.forEach(goat => {
     const isVaccinated = vaccineRecords.some(r => r.goatId === goat.id);
     const isDewormed = dewormingRecords.some(r => r.goatId === goat.id);
+    const sale = saleRecords.find(r => r.goatId === goat.id);
 
     worksheet.addRow({
       earTagNumber: goat.earTagNumber,
@@ -64,6 +101,11 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
       purchasePrice: goat.purchasePrice,
       vaccination: isVaccinated ? 'Vaccinated' : 'Unvaccinated',
       deworming: isDewormed ? 'Dewormed' : 'Not done',
+      buyerName: sale ? sale.buyerName : '',
+      saleWeight: sale ? sale.saleWeight : '',
+      saleRatePerKg: sale ? sale.saleRatePerKg : '',
+      saleAmount: sale ? sale.saleAmount : '',
+      netProfit: sale ? sale.netProfit : '',
       notes: goat.notes || '',
       status: goat.status
     });
@@ -184,6 +226,13 @@ export async function importGoatsFromExcel(file: File): Promise<ImportedGoatData
           const vaccinationStatus = vaccinationVal === 'vaccinated' ? 'vaccinated' : 'unvaccinated';
           const dewormingStatus = dewormingVal === 'dewormed' ? 'dewormed' : 'not done';
 
+          // Sold fields if present
+          const buyerName = getCellVal(COLUMNS.buyerName)?.toString().trim();
+          const saleWeightVal = getCellVal(COLUMNS.saleWeight);
+          const saleWeight = saleWeightVal ? parseFloat(saleWeightVal.toString()) : undefined;
+          const saleRateVal = getCellVal(COLUMNS.saleRatePerKg);
+          const saleRatePerKg = saleRateVal ? parseFloat(saleRateVal.toString()) : undefined;
+
           goats.push({
             earTagNumber,
             variant,
@@ -195,7 +244,10 @@ export async function importGoatsFromExcel(file: File): Promise<ImportedGoatData
             notes,
             status: status as 'active' | 'sold' | 'deceased',
             vaccinationStatus,
-            dewormingStatus
+            dewormingStatus,
+            buyerName,
+            saleWeight,
+            saleRatePerKg
           });
         });
 

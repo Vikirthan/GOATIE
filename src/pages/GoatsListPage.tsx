@@ -11,7 +11,8 @@ import {
   getAllDeworming,
   getAllVaccinations,
   recordVaccination,
-  recordDeworming
+  recordDeworming,
+  recordSale
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
@@ -161,6 +162,26 @@ export const GoatsListPage: React.FC = () => {
             medicineUsed: 'Imported',
             administeredBy: 'Import',
             status: 'dewormed',
+          });
+        }
+
+        // Log sale info if present in Excel
+        if (pg.buyerName && pg.saleWeight && pg.saleWeight > 0 && pg.saleRatePerKg && pg.saleRatePerKg > 0) {
+          const saleAmount = pg.saleWeight * pg.saleRatePerKg;
+          const netProfit = saleAmount - pg.purchasePrice;
+          const profitPercentage = pg.purchasePrice > 0 ? (netProfit / pg.purchasePrice) * 100 : 0;
+
+          await recordSale(goatId, {
+            goatId,
+            saleDate: pg.saleDate || pg.purchaseDate || new Date(),
+            saleWeight: pg.saleWeight,
+            saleRatePerKg: pg.saleRatePerKg,
+            buyerName: pg.buyerName,
+            buyerContact: pg.buyerContact,
+            saleAmount,
+            netProfit,
+            profitPercentage,
+            remarks: pg.remarks,
           });
         }
 

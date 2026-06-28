@@ -32,6 +32,7 @@ export const DashboardPage: React.FC = () => {
   const [showDewormingModal, setShowDewormingModal] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [goatsList, setGoatsList] = useState<Goat[]>([]);
+  const [salesChartData, setSalesChartData] = useState<{ month: string; sales: number }[]>([]);
 
   const [stats, setStats] = useState({
     totalGoats: 0,
@@ -79,6 +80,41 @@ export const DashboardPage: React.FC = () => {
     remarks: '',
   });
 
+  // Calculate dynamic sales trend data (last 6 months)
+  const getLast6Months = () => {
+    const months = [];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const today = new Date();
+    
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      months.push({
+        month: monthNames[d.getMonth()],
+        year: d.getFullYear(),
+        monthIndex: d.getMonth(),
+        sales: 0
+      });
+    }
+    return months;
+  };
+
+  const computeTrend = (goats: Goat[]) => {
+    const trend = getLast6Months();
+    goats.forEach(goat => {
+      if (goat.status === 'sold' && goat.saleInfo) {
+        const saleDate = new Date(goat.saleInfo.saleDate);
+        const saleMonth = saleDate.getMonth();
+        const saleYear = saleDate.getFullYear();
+        
+        const match = trend.find(m => m.monthIndex === saleMonth && m.year === saleYear);
+        if (match) {
+          match.sales += 1;
+        }
+      }
+    });
+    return trend.map(t => ({ month: t.month, sales: t.sales }));
+  };
+
   const loadData = async () => {
     if (!user) return;
 
@@ -118,6 +154,7 @@ export const DashboardPage: React.FC = () => {
         pendingVaccination: pendingVaccinationCount,
       });
       setGoatsList(active);
+      setSalesChartData(computeTrend(farmerGoats));
 
       if (active.length > 0) {
         setWeightForm((prev) => ({ ...prev, goatId: active[0].id }));
@@ -145,6 +182,7 @@ export const DashboardPage: React.FC = () => {
         pendingVaccination: vacc.length,
       });
       setGoatsList(freshActive);
+      setSalesChartData(computeTrend(allGoats));
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
     } finally {
@@ -383,14 +421,7 @@ export const DashboardPage: React.FC = () => {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={[
-                { month: 'Jan', sales: 4 },
-                { month: 'Feb', sales: 6 },
-                { month: 'Mar', sales: 5 },
-                { month: 'Apr', sales: 8 },
-                { month: 'May', sales: 7 },
-                { month: 'Jun', sales: 9 },
-              ]}>
+              <LineChart data={salesChartData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
