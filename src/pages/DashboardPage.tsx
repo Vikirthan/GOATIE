@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -9,6 +10,7 @@ import * as indexedDB from '@/lib/indexeddb';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord } from '@/types';
 
 export const DashboardPage: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -175,13 +177,28 @@ export const DashboardPage: React.FC = () => {
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Button variant="primary" size="lg" className="w-full h-12">
+        <Button
+          variant="primary"
+          size="lg"
+          className="w-full h-12"
+          onClick={() => navigate('/goats/register')}
+        >
           Register New Goat
         </Button>
-        <Button variant="secondary" size="lg" className="w-full h-12">
+        <Button
+          variant="secondary"
+          size="lg"
+          className="w-full h-12"
+          onClick={() => navigate('/goats')}
+        >
           Record Weight
         </Button>
-        <Button variant="outline" size="lg" className="w-full h-12">
+        <Button
+          variant="outline"
+          size="lg"
+          className="w-full h-12"
+          onClick={() => navigate('/goats')}
+        >
           View All Goats
         </Button>
       </div>
