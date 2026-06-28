@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Menu, X, Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
@@ -7,6 +8,7 @@ import { logout } from '@/services/authService';
 import { showToast } from '@/components/common/Toast';
 
 export const Navbar: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -25,7 +27,10 @@ export const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
-          <div className="flex items-center gap-2">
+          <div
+            className="flex items-center gap-2 cursor-pointer hover:opacity-90 active:scale-95 transition-all"
+            onClick={() => navigate('/')}
+          >
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white font-bold">
               G
             </div>
