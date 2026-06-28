@@ -9,7 +9,9 @@ import {
   createGoat,
   getGoatByEarTag,
   getAllDeworming,
-  getAllVaccinations
+  getAllVaccinations,
+  recordVaccination,
+  recordDeworming
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
@@ -128,11 +130,40 @@ export const GoatsListPage: React.FC = () => {
         const qrCode = await generateQRCode(pg.earTagNumber);
         const barcode = generateBarcode(pg.earTagNumber);
 
-        await createGoat(user.id, {
-          ...pg,
+        const goatId = await createGoat(user.id, {
+          earTagNumber: pg.earTagNumber,
+          purchaseDate: pg.purchaseDate,
+          purchaseWeight: pg.purchaseWeight,
+          variant: pg.variant,
+          gender: pg.gender,
+          purchasePrice: pg.purchasePrice,
+          sellerName: pg.sellerName,
+          notes: pg.notes,
+          photoURL: pg.photoURL,
           qrCode,
           barcode
         });
+
+        if (pg.vaccinationStatus === 'vaccinated') {
+          await recordVaccination(goatId, {
+            goatId,
+            vaccinationDate: pg.purchaseDate || new Date(),
+            vaccineBrand: 'Imported',
+            administeredBy: 'Import',
+            status: 'vaccinated',
+          });
+        }
+
+        if (pg.dewormingStatus === 'dewormed') {
+          await recordDeworming(goatId, {
+            goatId,
+            dewormingDate: pg.purchaseDate || new Date(),
+            medicineUsed: 'Imported',
+            administeredBy: 'Import',
+            status: 'dewormed',
+          });
+        }
+
         importedCount++;
       }
 

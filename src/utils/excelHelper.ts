@@ -1,7 +1,8 @@
 import ExcelJS from 'exceljs';
 import { Goat } from '@/types';
+import { getAllDeworming, getAllVaccinations } from '@/services/firebaseService';
 
-// Exact column headers based on UI language (Seller and Age details removed)
+// Exact column headers including Vaccine and Deworming
 const COLUMNS = {
   earTagNumber: 'Goat Number (Ear Tag)',
   variant: 'Variant/Breed',
@@ -9,9 +10,16 @@ const COLUMNS = {
   purchaseDate: 'Purchase Date',
   purchaseWeight: 'Purchase Weight (kg)',
   purchasePrice: 'Purchase Price (₹)',
+  vaccination: 'Vaccination',
+  deworming: 'Deworming',
   notes: 'Notes',
   status: 'Status'
 };
+
+export interface ImportedGoatData extends Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'qrCode' | 'barcode'> {
+  vaccinationStatus?: 'vaccinated' | 'unvaccinated';
+  dewormingStatus?: 'dewormed' | 'not done';
+}
 
 // Export Goats to Excel
 export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
@@ -26,12 +34,27 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
     { header: COLUMNS.purchaseDate, key: 'purchaseDate', width: 18 },
     { header: COLUMNS.purchaseWeight, key: 'purchaseWeight', width: 22 },
     { header: COLUMNS.purchasePrice, key: 'purchasePrice', width: 20 },
+    { header: COLUMNS.vaccination, key: 'vaccination', width: 18 },
+    { header: COLUMNS.deworming, key: 'deworming', width: 18 },
     { header: COLUMNS.notes, key: 'notes', width: 30 },
     { header: COLUMNS.status, key: 'status', width: 15 }
   ];
 
+  // Fetch deworming and vaccinations
+  let dewormingRecords: any[] = [];
+  let vaccineRecords: any[] = [];
+  try {
+    dewormingRecords = await getAllDeworming();
+    vaccineRecords = await getAllVaccinations();
+  } catch (err) {
+    console.error('Error fetching records for Excel export:', err);
+  }
+
   // Add rows
   goats.forEach(goat => {
+    const isVaccinated = vaccineRecords.some(r => r.goatId === goat.id);
+    const isDewormed = dewormingRecords.some(r => r.goatId === goat.id);
+
     worksheet.addRow({
       earTagNumber: goat.earTagNumber,
       variant: goat.variant,
@@ -39,6 +62,8 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
       purchaseDate: goat.purchaseDate ? new Date(goat.purchaseDate).toISOString().split('T')[0] : '',
       purchaseWeight: goat.purchaseWeight,
       purchasePrice: goat.purchasePrice,
+      vaccination: isVaccinated ? 'Vaccinated' : 'Unvaccinated',
+      deworming: isDewormed ? 'Dewormed' : 'Not done',
       notes: goat.notes || '',
       status: goat.status
     });
@@ -66,7 +91,7 @@ export async function exportGoatsToExcel(goats: Goat[]): Promise<void> {
 }
 
 // Import Goats from Excel
-export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'qrCode' | 'barcode'>[]> {
+export async function importGoatsFromExcel(file: File): Promise<ImportedGoatData[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -80,7 +105,7 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
           throw new Error('No worksheets found in the Excel file');
         }
 
-        const goats: Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'qrCode' | 'barcode'>[] = [];
+        const goats: ImportedGoatData[] = [];
         const colIndices: { [key: string]: number } = {};
 
         // Find headers
@@ -153,6 +178,12 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
             status = 'active';
           }
 
+          const vaccinationVal = getCellVal(COLUMNS.vaccination)?.toString().trim().toLowerCase();
+          const dewormingVal = getCellVal(COLUMNS.deworming)?.toString().trim().toLowerCase();
+
+          const vaccinationStatus = vaccinationVal === 'vaccinated' ? 'vaccinated' : 'unvaccinated';
+          const dewormingStatus = dewormingVal === 'dewormed' ? 'dewormed' : 'not done';
+
           goats.push({
             earTagNumber,
             variant,
@@ -162,7 +193,9 @@ export async function importGoatsFromExcel(file: File): Promise<Omit<Goat, 'id' 
             purchasePrice,
             sellerName: 'N/A', // Defaulted here for DB schema compatibility
             notes,
-            status: status as 'active' | 'sold' | 'deceased'
+            status: status as 'active' | 'sold' | 'deceased',
+            vaccinationStatus,
+            dewormingStatus
           });
         });
 
