@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/common/Loaders';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { getFarmerGoats, getGoatsDueForWeight, getPendingDeworming, getPendingVaccination } from '@/services/firebaseService';
+import * as indexedDB from '@/lib/indexeddb';
+import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord } from '@/types';
 
 export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
@@ -18,34 +20,71 @@ export const DashboardPage: React.FC = () => {
     pendingVaccination: 0,
   });
 
+  const loadData = async () => {
+    if (!user) return;
+
+    try {
+      // 1. Instant local load from IndexedDB cache
+      const localGoats = await indexedDB.getAllItems<Goat>('goats');
+      const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
+      const active = farmerGoats.filter((g) => g.status === 'active');
+      const sold = farmerGoats.filter((g) => g.status === 'sold');
+      
+      const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+      const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
+      const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+
+      const now = new Date();
+      const weightDueCount = active.filter((g) => {
+        const w = localWeights.filter((wRecord) => wRecord.goatId === g.id);
+        return w.some((weight) => !weight.isRecorded && new Date(weight.dueDate) <= now);
+      }).length;
+
+      const pendingDewormingCount = active.filter((g) => {
+        const d = localDeworm.find((r) => r.goatId === g.id);
+        return !d;
+      }).length;
+
+      const pendingVaccinationCount = active.filter((g) => {
+        const v = localVacc.find((r) => r.goatId === g.id);
+        return !v;
+      }).length;
+
+      setStats({
+        totalGoats: farmerGoats.length,
+        activeGoats: active.length,
+        soldGoats: sold.length,
+        weightDue: weightDueCount,
+        pendingDeworming: pendingDewormingCount,
+        pendingVaccination: pendingVaccinationCount,
+      });
+      setLoading(false); // Snappy first load render!
+
+      // 2. Fetch fresh data in background from Sheets/Firestore
+      const allGoats = await getFarmerGoats(user.id);
+      const freshActive = allGoats.filter((g) => g.status === 'active');
+      const freshSold = allGoats.filter((g) => g.status === 'sold');
+      const weightDue = await getGoatsDueForWeight(user.id);
+      const deworm = await getPendingDeworming(user.id);
+      const vacc = await getPendingVaccination(user.id);
+
+      setStats({
+        totalGoats: allGoats.length,
+        activeGoats: freshActive.length,
+        soldGoats: freshSold.length,
+        weightDue: weightDue.length,
+        pendingDeworming: deworm.length,
+        pendingVaccination: vacc.length,
+      });
+    } catch (error) {
+      console.error('Error loading dashboard stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadDashboardData = async () => {
-      if (!user) return;
-
-      try {
-        const allGoats = await getFarmerGoats(user.id);
-        const active = allGoats.filter((g) => g.status === 'active');
-        const sold = allGoats.filter((g) => g.status === 'sold');
-        const weightDue = await getGoatsDueForWeight(user.id);
-        const deworm = await getPendingDeworming(user.id);
-        const vacc = await getPendingVaccination(user.id);
-
-        setStats({
-          totalGoats: allGoats.length,
-          activeGoats: active.length,
-          soldGoats: sold.length,
-          weightDue: weightDue.length,
-          pendingDeworming: deworm.length,
-          pendingVaccination: vacc.length,
-        });
-      } catch (error) {
-        console.error('Error loading dashboard:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadDashboardData();
+    loadData();
   }, [user]);
 
   if (loading) return <LoadingSpinner message="Loading dashboard..." />;

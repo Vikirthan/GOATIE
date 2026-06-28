@@ -41,16 +41,14 @@ export async function createGoat(
   };
 
   if (useSheetsOrLocal()) {
-    // Write locally to IndexedDB
+    // Write locally to IndexedDB immediately
     await indexedDB.addItem('goats', goat);
     
-    // Sync with Google Sheets if configured
+    // Sync with Google Sheets in the background
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeGoatSheet(goat);
-      } catch (err) {
-        console.error('Error syncing createGoat to Google Sheets:', err);
-      }
+      sheetsService.writeGoatSheet(goat).catch((err) => {
+        console.error('Error background syncing createGoat to Google Sheets:', err);
+      });
     }
     return id;
   }
@@ -71,11 +69,9 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
       await indexedDB.updateItem('goats', updatedGoat);
 
       if (sheetsService.isSheetsConfigured()) {
-        try {
-          await sheetsService.updateGoatSheet(updatedGoat);
-        } catch (err) {
-          console.error('Error syncing updateGoat to Google Sheets:', err);
-        }
+        sheetsService.updateGoatSheet(updatedGoat).catch((err) => {
+          console.error('Error background syncing updateGoat to Google Sheets:', err);
+        });
       }
     }
     return;
@@ -89,23 +85,22 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
 
 export async function getGoat(goatId: string): Promise<Goat | null> {
   if (useSheetsOrLocal()) {
-    // Try Google Sheets first if configured
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const goats = await sheetsService.getGoatsSheet();
-        const goat = goats.find((g) => g.id === goatId) || null;
-        if (goat) {
-          // Cache in IndexedDB
-          await indexedDB.updateItem('goats', goat);
-          return goat;
-        }
-      } catch (err) {
-        console.error('Error fetching goat from Google Sheets:', err);
-      }
-    }
+    // Try local IndexedDB first for speed
+    const localGoat = await indexedDB.getItem<Goat>('goats', goatId);
     
-    // Fallback to IndexedDB
-    return (await indexedDB.getItem<Goat>('goats', goatId)) || null;
+    // Fetch from Google Sheets in the background to update cache
+    if (sheetsService.isSheetsConfigured()) {
+      sheetsService.getGoatsSheet().then(async (goats) => {
+        const fresh = goats.find((g) => g.id === goatId);
+        if (fresh) {
+          await indexedDB.updateItem('goats', fresh);
+        }
+      }).catch((err) => {
+        console.error('Error background fetching goat from Google Sheets:', err);
+      });
+    }
+
+    return localGoat || null;
   }
 
   const snapshot = await getDoc(doc(db, 'goats', goatId));
@@ -114,23 +109,21 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
   if (useSheetsOrLocal()) {
-    let goats: Goat[] = [];
+    const goats = await indexedDB.getAllItems<Goat>('goats');
+    const localMatch = goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber) || null;
+
+    // Fetch from Google Sheets in the background to update cache
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        goats = await sheetsService.getGoatsSheet();
-        // Update local cache
-        for (const g of goats) {
+      sheetsService.getGoatsSheet().then(async (freshGoats) => {
+        for (const g of freshGoats) {
           await indexedDB.updateItem('goats', g);
         }
-      } catch (err) {
-        console.error('Error fetching goats from Google Sheets:', err);
-        goats = await indexedDB.getAllItems<Goat>('goats');
-      }
-    } else {
-      goats = await indexedDB.getAllItems<Goat>('goats');
+      }).catch((err) => {
+        console.error('Error background fetching goats for ear tag check:', err);
+      });
     }
 
-    return goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber) || null;
+    return localMatch;
   }
 
   const q = query(
@@ -145,29 +138,31 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
 
 export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
   if (useSheetsOrLocal()) {
-    let goats: Goat[] = [];
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        goats = await sheetsService.getGoatsSheet();
-        // Cache in IndexedDB
-        await indexedDB.clearStore('goats');
-        for (const g of goats) {
-          await indexedDB.updateItem('goats', g);
-        }
-      } catch (err) {
-        console.error('Error fetching farmer goats from Google Sheets:', err);
-        goats = await indexedDB.getAllItems<Goat>('goats');
-      }
-    } else {
-      goats = await indexedDB.getAllItems<Goat>('goats');
-    }
-
-    let filtered = goats.filter((g) => g.farmerId === farmerId);
+    // First read from IndexedDB
+    const localGoats = await indexedDB.getAllItems<Goat>('goats');
+    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
     if (status) {
       filtered = filtered.filter((g) => g.status === status);
     }
-    // Sort by createdAt descending
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const sortedLocal = filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    // Trigger background update from Google Sheets
+    if (sheetsService.isSheetsConfigured()) {
+      sheetsService.getGoatsSheet().then(async (freshGoats) => {
+        // Find existing local goats to not wipe other farmers if multi-tenant
+        const otherFarmersGoats = localGoats.filter((g) => g.farmerId !== farmerId);
+        const mergedGoats = [...otherFarmersGoats, ...freshGoats.filter((g) => g.farmerId === farmerId)];
+        
+        await indexedDB.clearStore('goats');
+        for (const g of mergedGoats) {
+          await indexedDB.updateItem('goats', g);
+        }
+      }).catch((err) => {
+        console.error('Error background updating farmer goats from Google Sheets:', err);
+      });
+    }
+
+    return sortedLocal;
   }
 
   let q: Query;
@@ -194,11 +189,9 @@ export async function deleteGoat(goatId: string): Promise<void> {
   if (useSheetsOrLocal()) {
     await indexedDB.deleteItem('goats', goatId);
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.deleteGoatSheet(goatId);
-      } catch (err) {
-        console.error('Error deleting goat from Google Sheets:', err);
-      }
+      sheetsService.deleteGoatSheet(goatId).catch((err) => {
+        console.error('Error background deleting goat from Google Sheets:', err);
+      });
     }
     return;
   }
@@ -225,11 +218,9 @@ export async function recordWeight(
   if (useSheetsOrLocal()) {
     await indexedDB.addItem('weights', record);
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeWeightSheet(record);
-      } catch (err) {
-        console.error('Error syncing weight to Google Sheets:', err);
-      }
+      sheetsService.writeWeightSheet(record).catch((err) => {
+        console.error('Error background syncing weight to Google Sheets:', err);
+      });
     }
     return id;
   }
@@ -240,23 +231,20 @@ export async function recordWeight(
 
 export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
   if (useSheetsOrLocal()) {
-    let weights: WeightRecord[] = [];
+    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+    const localMatch = localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
+
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        weights = await sheetsService.getWeightsSheet();
-        // Cache locally
-        for (const w of weights) {
+      sheetsService.getWeightsSheet().then(async (freshWeights) => {
+        for (const w of freshWeights) {
           await indexedDB.updateItem('weights', w);
         }
-      } catch (err) {
-        console.error('Error fetching weights from Google Sheets:', err);
-        weights = await indexedDB.getAllItems<WeightRecord>('weights');
-      }
-    } else {
-      weights = await indexedDB.getAllItems<WeightRecord>('weights');
+      }).catch((err) => {
+        console.error('Error background fetching weights from Google Sheets:', err);
+      });
     }
 
-    return weights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
+    return localMatch;
   }
 
   const q = query(
@@ -271,22 +259,20 @@ export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
 
 export async function getWeightRecord(goatId: string, weightNumber: number): Promise<WeightRecord | null> {
   if (useSheetsOrLocal()) {
-    let weights: WeightRecord[] = [];
+    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+    const localMatch = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
+
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        weights = await sheetsService.getWeightsSheet();
-        for (const w of weights) {
+      sheetsService.getWeightsSheet().then(async (freshWeights) => {
+        for (const w of freshWeights) {
           await indexedDB.updateItem('weights', w);
         }
-      } catch (err) {
-        console.error('Error fetching weights from Google Sheets:', err);
-        weights = await indexedDB.getAllItems<WeightRecord>('weights');
-      }
-    } else {
-      weights = await indexedDB.getAllItems<WeightRecord>('weights');
+      }).catch((err) => {
+        console.error('Error background fetching weight record:', err);
+      });
     }
 
-    return weights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
+    return localMatch;
   }
 
   const q = query(
@@ -318,11 +304,9 @@ export async function recordDeworming(
   if (useSheetsOrLocal()) {
     await indexedDB.addItem('deworming', record);
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeDewormingSheet(record);
-      } catch (err) {
-        console.error('Error syncing deworming to Google Sheets:', err);
-      }
+      sheetsService.writeDewormingSheet(record).catch((err) => {
+        console.error('Error background syncing deworming to Google Sheets:', err);
+      });
     }
     return id;
   }
@@ -333,22 +317,20 @@ export async function recordDeworming(
 
 export async function getGoatDeworming(goatId: string): Promise<DewormingRecord | null> {
   if (useSheetsOrLocal()) {
-    let records: DewormingRecord[] = [];
+    const localRecords = await indexedDB.getAllItems<DewormingRecord>('deworming');
+    const localMatch = localRecords.find((r) => r.goatId === goatId) || null;
+
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        records = await sheetsService.getDewormingSheet();
-        for (const r of records) {
+      sheetsService.getDewormingSheet().then(async (freshRecords) => {
+        for (const r of freshRecords) {
           await indexedDB.updateItem('deworming', r);
         }
-      } catch (err) {
-        console.error('Error fetching deworming from Google Sheets:', err);
-        records = await indexedDB.getAllItems<DewormingRecord>('deworming');
-      }
-    } else {
-      records = await indexedDB.getAllItems<DewormingRecord>('deworming');
+      }).catch((err) => {
+        console.error('Error background fetching deworming records:', err);
+      });
     }
 
-    return records.find((r) => r.goatId === goatId) || null;
+    return localMatch;
   }
 
   const q = query(
@@ -379,11 +361,9 @@ export async function recordVaccination(
   if (useSheetsOrLocal()) {
     await indexedDB.addItem('vaccination', record);
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeVaccinationSheet(record);
-      } catch (err) {
-        console.error('Error syncing vaccination to Google Sheets:', err);
-      }
+      sheetsService.writeVaccinationSheet(record).catch((err) => {
+        console.error('Error background syncing vaccination to Google Sheets:', err);
+      });
     }
     return id;
   }
@@ -394,22 +374,20 @@ export async function recordVaccination(
 
 export async function getGoatVaccination(goatId: string): Promise<PPRVaccinationRecord | null> {
   if (useSheetsOrLocal()) {
-    let records: PPRVaccinationRecord[] = [];
+    const localRecords = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+    const localMatch = localRecords.find((r) => r.goatId === goatId) || null;
+
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        records = await sheetsService.getVaccinationSheet();
-        for (const r of records) {
+      sheetsService.getVaccinationSheet().then(async (freshRecords) => {
+        for (const r of freshRecords) {
           await indexedDB.updateItem('vaccination', r);
         }
-      } catch (err) {
-        console.error('Error fetching vaccination from Google Sheets:', err);
-        records = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-      }
-    } else {
-      records = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+      }).catch((err) => {
+        console.error('Error background fetching vaccinations:', err);
+      });
     }
 
-    return records.find((r) => r.goatId === goatId) || null;
+    return localMatch;
   }
 
   const q = query(
@@ -437,16 +415,13 @@ export async function recordSale(
   };
 
   if (useSheetsOrLocal()) {
-    // Update goat status to sold
     await updateGoat(goatId, { status: 'sold', saleInfo: sale });
     await indexedDB.addItem('sales', sale);
 
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeSaleSheet(sale);
-      } catch (err) {
-        console.error('Error syncing sale to Google Sheets:', err);
-      }
+      sheetsService.writeSaleSheet(sale).catch((err) => {
+        console.error('Error background syncing sale to Google Sheets:', err);
+      });
     }
     return id;
   }
@@ -466,22 +441,20 @@ export async function recordSale(
 
 export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   if (useSheetsOrLocal()) {
-    let sales: SaleInfo[] = [];
+    const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
+    const localMatch = localSales.find((s) => s.goatId === goatId) || null;
+
     if (sheetsService.isSheetsConfigured()) {
-      try {
-        sales = await sheetsService.getSalesSheet();
-        for (const s of sales) {
+      sheetsService.getSalesSheet().then(async (freshSales) => {
+        for (const s of freshSales) {
           await indexedDB.updateItem('sales', s);
         }
-      } catch (err) {
-        console.error('Error fetching sales from Google Sheets:', err);
-        sales = await indexedDB.getAllItems<SaleInfo>('sales');
-      }
-    } else {
-      sales = await indexedDB.getAllItems<SaleInfo>('sales');
+      }).catch((err) => {
+        console.error('Error background fetching sales info:', err);
+      });
     }
 
-    return sales.find((s) => s.goatId === goatId) || null;
+    return localMatch;
   }
 
   const q = query(
