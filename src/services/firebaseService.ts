@@ -202,8 +202,89 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
     if (sheetsService.isSheetsConfigured()) {
       try {
         const freshGoats = await sheetsService.getGoatsSheet();
-        // Update IndexedDB with fresh data
         const localGoats = await indexedDB.getAllItems<Goat>('goats');
+        
+        // Find goats created locally while Sheets was unconfigured/offline
+        const unsyncedGoats = localGoats.filter(
+          (lg) => lg.farmerId === farmerId && !freshGoats.some((fg) => fg.id === lg.id)
+        );
+
+        if (unsyncedGoats.length > 0) {
+          for (const ug of unsyncedGoats) {
+            try {
+              // 1. Sync goat
+              await sheetsService.writeGoatSheet(ug);
+
+              // 2. Sync weights
+              const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+              const ugWeights = localWeights.filter((w) => w.goatId === ug.id);
+              for (const uw of ugWeights) {
+                await sheetsService.writeWeightSheet(uw);
+              }
+
+              // 3. Sync dewormings
+              const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
+              const ugDewormings = localDewormings.filter((d) => d.goatId === ug.id);
+              for (const ud of ugDewormings) {
+                await sheetsService.writeDewormingSheet(ud);
+              }
+
+              // 4. Sync vaccinations
+              const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+              const ugVaccinations = localVaccinations.filter((v) => v.goatId === ug.id);
+              for (const uv of ugVaccinations) {
+                await sheetsService.writeVaccinationSheet(uv);
+              }
+
+              // 5. Sync sale if sold
+              if (ug.status === 'sold' && ug.saleInfo) {
+                await sheetsService.writeSaleSheet(ug.saleInfo);
+              }
+
+              freshGoats.push(ug);
+            } catch (syncErr) {
+              console.error(`Failed to sync local goat ${ug.earTagNumber} to sheets:`, syncErr);
+            }
+          }
+        }
+
+        // Also check for any unsynced weights/vaccinations/dewormings on existing goats
+        try {
+          const freshWeights = await sheetsService.getWeightsSheet();
+          const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+          const unsyncedWeights = localWeights.filter(
+            (lw) => lw.isRecorded && 
+                    freshGoats.some((g) => g.id === lw.goatId && g.farmerId === farmerId) && 
+                    !freshWeights.some((fw) => fw.id === lw.id)
+          );
+          for (const uw of unsyncedWeights) {
+            await sheetsService.writeWeightSheet(uw).catch(() => {});
+          }
+
+          const freshDewormings = await sheetsService.getDewormingSheet();
+          const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
+          const unsyncedDewormings = localDewormings.filter(
+            (ld) => freshGoats.some((g) => g.id === ld.goatId && g.farmerId === farmerId) && 
+                    !freshDewormings.some((fd) => fd.id === ld.id)
+          );
+          for (const ud of unsyncedDewormings) {
+            await sheetsService.writeDewormingSheet(ud).catch(() => {});
+          }
+
+          const freshVaccinations = await sheetsService.getVaccinationSheet();
+          const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+          const unsyncedVaccinations = localVaccinations.filter(
+            (lv) => freshGoats.some((g) => g.id === lv.goatId && g.farmerId === farmerId) && 
+                    !freshVaccinations.some((fv) => fv.id === lv.id)
+          );
+          for (const uv of unsyncedVaccinations) {
+            await sheetsService.writeVaccinationSheet(uv).catch(() => {});
+          }
+        } catch (subSyncErr) {
+          console.error('Error syncing individual records:', subSyncErr);
+        }
+
+        // Update IndexedDB with fresh data
         const otherFarmers = localGoats.filter((g) => g.farmerId !== farmerId);
         await indexedDB.clearStore('goats');
         for (const g of [...otherFarmers, ...freshGoats.filter((g) => g.farmerId === farmerId)]) {
