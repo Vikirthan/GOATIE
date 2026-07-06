@@ -24,7 +24,8 @@ const useSheetsOrLocal = (): boolean => {
   return isDemo || !db || sheetsService.isSheetsConfigured();
 };
 
-// Goat Services
+// ─── Goat Services ───────────────────────────────────────────────────────────
+
 export async function createGoat(
   farmerId: string,
   goatData: Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'status'>
@@ -61,7 +62,7 @@ export async function createGoat(
     return d;
   };
 
-  // Generate weightNumber 1, 2, 3, 4 placeholders (unrecorded, with monthly due dates)
+  // Generate weightNumber 1-4 placeholders (unrecorded, with monthly due dates)
   const placeholders: WeightRecord[] = [];
   for (let m = 1; m <= 4; m++) {
     placeholders.push({
@@ -83,19 +84,18 @@ export async function createGoat(
     for (const w of placeholders) {
       await indexedDB.addItem('weights', w);
     }
-    
-    // Sync with Google Sheets in the background
+
+    // Sync with Google Sheets — await to ensure data is saved before returning
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.writeGoatSheet(goat).catch((err) => {
-        console.error('Error background syncing createGoat to Google Sheets:', err);
-      });
-      sheetsService.writeWeightSheet(w0).catch((err) => {
-        console.error('Error background syncing weight 0 to Google Sheets:', err);
-      });
-      for (const w of placeholders) {
-        sheetsService.writeWeightSheet(w).catch((err) => {
-          console.error('Error background syncing placeholder weights to Google Sheets:', err);
-        });
+      try {
+        await sheetsService.writeGoatSheet(goat);
+        await sheetsService.writeWeightSheet(w0);
+        for (const w of placeholders) {
+          await sheetsService.writeWeightSheet(w);
+        }
+      } catch (err) {
+        console.error('Error syncing createGoat to Google Sheets:', err);
+        // Don't throw — local data is saved, Sheets sync failure is non-fatal
       }
     }
     return id;
@@ -122,9 +122,11 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
       await indexedDB.updateItem('goats', updatedGoat);
 
       if (sheetsService.isSheetsConfigured()) {
-        sheetsService.updateGoatSheet(updatedGoat).catch((err) => {
-          console.error('Error background syncing updateGoat to Google Sheets:', err);
-        });
+        try {
+          await sheetsService.updateGoatSheet(updatedGoat);
+        } catch (err) {
+          console.error('Error syncing updateGoat to Google Sheets:', err);
+        }
       }
     }
     return;
@@ -138,22 +140,21 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
 
 export async function getGoat(goatId: string): Promise<Goat | null> {
   if (useSheetsOrLocal()) {
-    // Try local IndexedDB first for speed
-    const localGoat = await indexedDB.getItem<Goat>('goats', goatId);
-    
-    // Fetch from Google Sheets in the background to update cache
+    // Fetch fresh from Sheets if configured
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (goats) => {
+      try {
+        const goats = await sheetsService.getGoatsSheet();
         const fresh = goats.find((g) => g.id === goatId);
         if (fresh) {
           await indexedDB.updateItem('goats', fresh);
+          return fresh;
         }
-      }).catch((err) => {
-        console.error('Error background fetching goat from Google Sheets:', err);
-      });
+      } catch (err) {
+        console.error('Error fetching goat from Google Sheets:', err);
+      }
     }
-
-    return localGoat || null;
+    // Fallback to IndexedDB
+    return await indexedDB.getItem<Goat>('goats', goatId) || null;
   }
 
   const snapshot = await getDoc(doc(db, 'goats', goatId));
@@ -162,27 +163,33 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
   if (useSheetsOrLocal()) {
-    const goats = await indexedDB.getAllItems<Goat>('goats');
-    const localMatch = goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber) || null;
-
-    // Fetch from Google Sheets in the background to update cache
+    // Fetch from Sheets for accuracy
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (freshGoats) => {
+      try {
+        const freshGoats = await sheetsService.getGoatsSheet();
+        // Only block if there's an ACTIVE goat with this tag (sold ones can be reused)
+        const match = freshGoats.find(
+          (g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active'
+        ) || null;
+        // Update local cache
         for (const g of freshGoats) {
           await indexedDB.updateItem('goats', g);
         }
-      }).catch((err) => {
-        console.error('Error background fetching goats for ear tag check:', err);
-      });
+        return match;
+      } catch (err) {
+        console.error('Error fetching goats for ear tag check:', err);
+      }
     }
-
-    return localMatch;
+    const goats = await indexedDB.getAllItems<Goat>('goats');
+    // Only block reuse if the goat is active
+    return goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active') || null;
   }
 
   const q = query(
     collection(db, 'goats'),
     where('farmerId', '==', farmerId),
-    where('earTagNumber', '==', earTagNumber)
+    where('earTagNumber', '==', earTagNumber),
+    where('status', '==', 'active')
   );
 
   const snapshot = await getDocs(q);
@@ -191,31 +198,30 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
 
 export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
   if (useSheetsOrLocal()) {
-    // First read from IndexedDB
-    const localGoats = await indexedDB.getAllItems<Goat>('goats');
-    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
-    if (status) {
-      filtered = filtered.filter((g) => g.status === status);
-    }
-    const sortedLocal = filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-    // Trigger background update from Google Sheets
+    // Fetch fresh from Sheets when configured
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getGoatsSheet().then(async (freshGoats) => {
-        // Find existing local goats to not wipe other farmers if multi-tenant
-        const otherFarmersGoats = localGoats.filter((g) => g.farmerId !== farmerId);
-        const mergedGoats = [...otherFarmersGoats, ...freshGoats.filter((g) => g.farmerId === farmerId)];
-        
+      try {
+        const freshGoats = await sheetsService.getGoatsSheet();
+        // Update IndexedDB with fresh data
+        const localGoats = await indexedDB.getAllItems<Goat>('goats');
+        const otherFarmers = localGoats.filter((g) => g.farmerId !== farmerId);
         await indexedDB.clearStore('goats');
-        for (const g of mergedGoats) {
+        for (const g of [...otherFarmers, ...freshGoats.filter((g) => g.farmerId === farmerId)]) {
           await indexedDB.updateItem('goats', g);
         }
-      }).catch((err) => {
-        console.error('Error background updating farmer goats from Google Sheets:', err);
-      });
+        let filtered = freshGoats.filter((g) => g.farmerId === farmerId);
+        if (status) filtered = filtered.filter((g) => g.status === status);
+        return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } catch (err) {
+        console.error('Error fetching farmer goats from Sheets:', err);
+      }
     }
 
-    return sortedLocal;
+    // Fallback to IndexedDB
+    const localGoats = await indexedDB.getAllItems<Goat>('goats');
+    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
+    if (status) filtered = filtered.filter((g) => g.status === status);
+    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
   let q: Query;
@@ -242,9 +248,11 @@ export async function deleteGoat(goatId: string): Promise<void> {
   if (useSheetsOrLocal()) {
     await indexedDB.deleteItem('goats', goatId);
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.deleteGoatSheet(goatId).catch((err) => {
-        console.error('Error background deleting goat from Google Sheets:', err);
-      });
+      try {
+        await sheetsService.deleteGoatSheet(goatId);
+      } catch (err) {
+        console.error('Error deleting goat from Google Sheets:', err);
+      }
     }
     return;
   }
@@ -252,7 +260,8 @@ export async function deleteGoat(goatId: string): Promise<void> {
   await deleteDoc(doc(db, 'goats', goatId));
 }
 
-// Weight Record Services
+// ─── Weight Record Services ───────────────────────────────────────────────────
+
 export async function recordWeight(
   goatId: string,
   weightData: Omit<WeightRecord, 'id' | 'createdAt' | 'updatedAt'>
@@ -260,23 +269,42 @@ export async function recordWeight(
   const now = new Date();
 
   if (useSheetsOrLocal()) {
+    // Fetch previous recorded weight to compute gain
+    const allWeights = sheetsService.isSheetsConfigured()
+      ? await sheetsService.getWeightsSheet().catch(() => indexedDB.getAllItems<WeightRecord>('weights'))
+      : await indexedDB.getAllItems<WeightRecord>('weights');
+
+    const goatWeights = (allWeights as WeightRecord[])
+      .filter((w) => w.goatId === goatId && w.isRecorded && w.weight > 0)
+      .sort((a, b) => a.weightNumber - b.weightNumber);
+
+    // Previous weight is the last recorded one before this weight number
+    const prevWeight = goatWeights
+      .filter((w) => w.weightNumber < weightData.weightNumber)
+      .pop();
+
+    const weightGain = prevWeight ? parseFloat((weightData.weight - prevWeight.weight).toFixed(2)) : undefined;
+
     const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
     const existing = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightData.weightNumber);
 
     if (existing) {
-      const updated = {
+      const updated: WeightRecord = {
         ...existing,
         weight: weightData.weight,
         recordedDate: weightData.recordedDate || now,
         remarks: weightData.remarks,
         isRecorded: true,
+        weightGain,
         updatedAt: now,
       };
       await indexedDB.updateItem('weights', updated);
       if (sheetsService.isSheetsConfigured()) {
-        sheetsService.updateWeightSheet(updated).catch((err) => {
-          console.error('Error background updating weight to Google Sheets:', err);
-        });
+        try {
+          await sheetsService.updateWeightSheet(updated);
+        } catch (err) {
+          console.error('Error updating weight in Google Sheets:', err);
+        }
       }
       return existing.id;
     } else {
@@ -286,14 +314,17 @@ export async function recordWeight(
         id,
         goatId,
         isRecorded: true,
+        weightGain,
         createdAt: now,
         updatedAt: now,
       };
       await indexedDB.addItem('weights', record);
       if (sheetsService.isSheetsConfigured()) {
-        sheetsService.writeWeightSheet(record).catch((err) => {
-          console.error('Error background syncing weight to Google Sheets:', err);
-        });
+        try {
+          await sheetsService.writeWeightSheet(record);
+        } catch (err) {
+          console.error('Error syncing weight to Google Sheets:', err);
+        }
       }
       return id;
     }
@@ -336,20 +367,19 @@ export async function recordWeight(
 
 export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
   if (useSheetsOrLocal()) {
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    const localMatch = localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
-
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getWeightsSheet().then(async (freshWeights) => {
+      try {
+        const freshWeights = await sheetsService.getWeightsSheet();
         for (const w of freshWeights) {
           await indexedDB.updateItem('weights', w);
         }
-      }).catch((err) => {
-        console.error('Error background fetching weights from Google Sheets:', err);
-      });
+        return freshWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
+      } catch (err) {
+        console.error('Error fetching weights from Sheets:', err);
+      }
     }
-
-    return localMatch;
+    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+    return localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
   }
 
   const q = query(
@@ -364,20 +394,16 @@ export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
 
 export async function getWeightRecord(goatId: string, weightNumber: number): Promise<WeightRecord | null> {
   if (useSheetsOrLocal()) {
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    const localMatch = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
-
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getWeightsSheet().then(async (freshWeights) => {
-        for (const w of freshWeights) {
-          await indexedDB.updateItem('weights', w);
-        }
-      }).catch((err) => {
-        console.error('Error background fetching weight record:', err);
-      });
+      try {
+        const freshWeights = await sheetsService.getWeightsSheet();
+        return freshWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
+      } catch (err) {
+        console.error('Error fetching weight record from Sheets:', err);
+      }
     }
-
-    return localMatch;
+    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+    return localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
   }
 
   const q = query(
@@ -390,17 +416,24 @@ export async function getWeightRecord(goatId: string, weightNumber: number): Pro
   return snapshot.empty ? null : (snapshot.docs[0].data() as WeightRecord);
 }
 
-// Deworming Services
+// ─── Deworming Services ───────────────────────────────────────────────────────
+
 export async function recordDeworming(
   goatId: string,
   data: Omit<DewormingRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
   const id = generateId();
   const now = new Date();
+
+  // Determine round number
+  const existingRecords = await getAllDewormingForGoat(goatId);
+  const roundNumber = (data.roundNumber) || existingRecords.length + 1;
+
   const record: DewormingRecord = {
     ...data,
     id,
     goatId,
+    roundNumber,
     status: 'dewormed',
     createdAt: now,
     updatedAt: now,
@@ -409,9 +442,11 @@ export async function recordDeworming(
   if (useSheetsOrLocal()) {
     await indexedDB.addItem('deworming', record);
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.writeDewormingSheet(record).catch((err) => {
-        console.error('Error background syncing deworming to Google Sheets:', err);
-      });
+      try {
+        await sheetsService.writeDewormingSheet(record);
+      } catch (err) {
+        console.error('Error syncing deworming to Google Sheets:', err);
+      }
     }
     return id;
   }
@@ -420,44 +455,47 @@ export async function recordDeworming(
   return id;
 }
 
-export async function getGoatDeworming(goatId: string): Promise<DewormingRecord | null> {
+export async function getAllDewormingForGoat(goatId: string): Promise<DewormingRecord[]> {
   if (useSheetsOrLocal()) {
-    const localRecords = await indexedDB.getAllItems<DewormingRecord>('deworming');
-    const localMatch = localRecords.find((r) => r.goatId === goatId) || null;
-
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getDewormingSheet().then(async (freshRecords) => {
-        for (const r of freshRecords) {
-          await indexedDB.updateItem('deworming', r);
-        }
-      }).catch((err) => {
-        console.error('Error background fetching deworming records:', err);
-      });
+      try {
+        const all = await sheetsService.getDewormingSheet();
+        return all.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
+      } catch (err) {
+        console.error('Error fetching deworming from Sheets:', err);
+      }
     }
-
-    return localMatch;
+    const local = await indexedDB.getAllItems<DewormingRecord>('deworming');
+    return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
   }
-
-  const q = query(
-    collection(db, 'deworming'),
-    where('goatId', '==', goatId)
-  );
-
+  const q = query(collection(db, 'deworming'), where('goatId', '==', goatId));
   const snapshot = await getDocs(q);
-  return snapshot.empty ? null : (snapshot.docs[0].data() as DewormingRecord);
+  return snapshot.docs.map((doc) => doc.data() as DewormingRecord);
 }
 
-// PPR Vaccination Services
+export async function getGoatDeworming(goatId: string): Promise<DewormingRecord | null> {
+  const all = await getAllDewormingForGoat(goatId);
+  return all.length > 0 ? all[all.length - 1] : null;
+}
+
+// ─── PPR Vaccination Services ─────────────────────────────────────────────────
+
 export async function recordVaccination(
   goatId: string,
   data: Omit<PPRVaccinationRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
   const id = generateId();
   const now = new Date();
+
+  // Determine round number
+  const existingRecords = await getAllVaccinationsForGoat(goatId);
+  const roundNumber = (data.roundNumber) || existingRecords.length + 1;
+
   const record: PPRVaccinationRecord = {
     ...data,
     id,
     goatId,
+    roundNumber,
     status: 'vaccinated',
     createdAt: now,
     updatedAt: now,
@@ -466,9 +504,11 @@ export async function recordVaccination(
   if (useSheetsOrLocal()) {
     await indexedDB.addItem('vaccination', record);
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.writeVaccinationSheet(record).catch((err) => {
-        console.error('Error background syncing vaccination to Google Sheets:', err);
-      });
+      try {
+        await sheetsService.writeVaccinationSheet(record);
+      } catch (err) {
+        console.error('Error syncing vaccination to Google Sheets:', err);
+      }
     }
     return id;
   }
@@ -477,34 +517,31 @@ export async function recordVaccination(
   return id;
 }
 
-export async function getGoatVaccination(goatId: string): Promise<PPRVaccinationRecord | null> {
+export async function getAllVaccinationsForGoat(goatId: string): Promise<PPRVaccinationRecord[]> {
   if (useSheetsOrLocal()) {
-    const localRecords = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-    const localMatch = localRecords.find((r) => r.goatId === goatId) || null;
-
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getVaccinationSheet().then(async (freshRecords) => {
-        for (const r of freshRecords) {
-          await indexedDB.updateItem('vaccination', r);
-        }
-      }).catch((err) => {
-        console.error('Error background fetching vaccinations:', err);
-      });
+      try {
+        const all = await sheetsService.getVaccinationSheet();
+        return all.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
+      } catch (err) {
+        console.error('Error fetching vaccinations from Sheets:', err);
+      }
     }
-
-    return localMatch;
+    const local = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+    return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
   }
-
-  const q = query(
-    collection(db, 'vaccination'),
-    where('goatId', '==', goatId)
-  );
-
+  const q = query(collection(db, 'vaccination'), where('goatId', '==', goatId));
   const snapshot = await getDocs(q);
-  return snapshot.empty ? null : (snapshot.docs[0].data() as PPRVaccinationRecord);
+  return snapshot.docs.map((doc) => doc.data() as PPRVaccinationRecord);
 }
 
-// Sale Services
+export async function getGoatVaccination(goatId: string): Promise<PPRVaccinationRecord | null> {
+  const all = await getAllVaccinationsForGoat(goatId);
+  return all.length > 0 ? all[all.length - 1] : null;
+}
+
+// ─── Sale Services ────────────────────────────────────────────────────────────
+
 export async function recordSale(
   goatId: string,
   saleData: Omit<SaleInfo, 'id' | 'createdAt' | 'updatedAt'>
@@ -524,9 +561,11 @@ export async function recordSale(
     await indexedDB.addItem('sales', sale);
 
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.writeSaleSheet(sale).catch((err) => {
-        console.error('Error background syncing sale to Google Sheets:', err);
-      });
+      try {
+        await sheetsService.writeSaleSheet(sale);
+      } catch (err) {
+        console.error('Error syncing sale to Google Sheets:', err);
+      }
     }
     return id;
   }
@@ -546,20 +585,19 @@ export async function recordSale(
 
 export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   if (useSheetsOrLocal()) {
-    const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
-    const localMatch = localSales.find((s) => s.goatId === goatId) || null;
-
     if (sheetsService.isSheetsConfigured()) {
-      sheetsService.getSalesSheet().then(async (freshSales) => {
+      try {
+        const freshSales = await sheetsService.getSalesSheet();
         for (const s of freshSales) {
           await indexedDB.updateItem('sales', s);
         }
-      }).catch((err) => {
-        console.error('Error background fetching sales info:', err);
-      });
+        return freshSales.find((s) => s.goatId === goatId) || null;
+      } catch (err) {
+        console.error('Error fetching sales info from Sheets:', err);
+      }
     }
-
-    return localMatch;
+    const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
+    return localSales.find((s) => s.goatId === goatId) || null;
   }
 
   const q = query(
@@ -571,7 +609,8 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   return snapshot.empty ? null : (snapshot.docs[0].data() as SaleInfo);
 }
 
-// Search and filter
+// ─── Search and Filter ────────────────────────────────────────────────────────
+
 export async function searchGoats(farmerId: string, searchTerm: string): Promise<Goat[]> {
   const allGoats = await getFarmerGoats(farmerId);
 

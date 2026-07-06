@@ -20,6 +20,7 @@ export interface Goat {
   gender: 'male' | 'female';
   age?: number;
   purchasePrice: number;
+  purchasePricePerKg?: number; // Auto-calculated from purchasePrice / purchaseWeight
   sellerName: string;
   sellerContact?: string;
   notes?: string;
@@ -54,6 +55,7 @@ export interface DewormingRecord {
   id: string;
   goatId: string;
   dewormingDate: Date;
+  roundNumber?: number; // 1, 2, 3 ... for multiple rounds
   medicineUsed?: string;
   batchNumber?: string;
   administeredBy?: string;
@@ -68,6 +70,7 @@ export interface PPRVaccinationRecord {
   id: string;
   goatId: string;
   vaccinationDate: Date;
+  roundNumber?: number; // 1, 2, 3 ... for multiple rounds
   vaccineBrand?: string;
   batchNumber?: string;
   administeredBy?: string;

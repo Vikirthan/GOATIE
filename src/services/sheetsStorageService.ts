@@ -13,10 +13,16 @@ async function callSheetsAPI(action: 'read' | 'write' | 'update' | 'delete' | 'b
   }
 
   if (action === 'read') {
+    // Always bust cache — append timestamp to prevent stale responses
     const url = `${WEBAPP_URL}?action=read&sheet=${sheetName}&_t=${Date.now()}`;
     const response = await fetch(url, {
       method: 'GET',
       mode: 'cors',
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      },
     });
     if (!response.ok) {
       throw new Error(`Failed to read from Google Sheet: ${response.statusText}`);
@@ -27,6 +33,7 @@ async function callSheetsAPI(action: 'read' | 'write' | 'update' | 'delete' | 'b
     const response = await fetch(WEBAPP_URL, {
       method: 'POST',
       mode: 'cors',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },

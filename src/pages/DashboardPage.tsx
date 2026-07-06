@@ -5,7 +5,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { Select } from '@/components/ui/Select';
 import { LoadingSpinner } from '@/components/common/Loaders';
 import { showToast } from '@/components/common/Toast';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -17,30 +16,50 @@ import {
   recordVaccination,
   recordDeworming,
   recordWeight,
-  recordSale
+  recordSale,
+  getGoatWeights,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
-import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord } from '@/types';
+import { Goat, WeightRecord } from '@/types';
+import {
+  Plus, Scale, Syringe, Bug, ShoppingCart, List,
+  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle
+} from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
   const [showWeightModal, setShowWeightModal] = useState(false);
   const [showVaccineModal, setShowVaccineModal] = useState(false);
   const [showDewormingModal, setShowDewormingModal] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
+  const [showWeightDueModal, setShowWeightDueModal] = useState(false);
+
   const [goatsList, setGoatsList] = useState<Goat[]>([]);
   const [salesChartData, setSalesChartData] = useState<{ month: string; sales: number }[]>([]);
+  const [weightDueGoats, setWeightDueGoats] = useState<{ goat: Goat; weight: WeightRecord }[]>([]);
+  const [weightDueSearch, setWeightDueSearch] = useState('');
 
-  // Search references & states for modals
+  // Searchable goat selectors
   const vaccineRef = useRef<HTMLDivElement>(null);
   const dewormingRef = useRef<HTMLDivElement>(null);
+  const weightRef = useRef<HTMLDivElement>(null);
+  const saleRef = useRef<HTMLDivElement>(null);
+
   const [vaccineSearch, setVaccineSearch] = useState('');
   const [showVaccineDropdown, setShowVaccineDropdown] = useState(false);
   const [dewormingSearch, setDewormingSearch] = useState('');
   const [showDewormingDropdown, setShowDewormingDropdown] = useState(false);
+  const [weightGoatSearch, setWeightGoatSearch] = useState('');
+  const [showWeightGoatDropdown, setShowWeightGoatDropdown] = useState(false);
+  const [saleGoatSearch, setSaleGoatSearch] = useState('');
+  const [showSaleGoatDropdown, setShowSaleGoatDropdown] = useState(false);
+
+  // Weight gain display
+  const [prevWeight, setPrevWeight] = useState<number | null>(null);
 
   const [stats, setStats] = useState({
     totalGoats: 0,
@@ -56,7 +75,6 @@ export const DashboardPage: React.FC = () => {
     weightNumber: '1',
     weight: '',
     recordedDate: new Date().toISOString().split('T')[0],
-    remarks: '',
   });
 
   const [vaccineForm, setVaccineForm] = useState({
@@ -74,6 +92,7 @@ export const DashboardPage: React.FC = () => {
     saleDate: new Date().toISOString().split('T')[0],
     saleWeight: '',
     saleRatePerKg: '',
+    saleTotalPrice: '',
     buyerName: '',
     buyerContact: '',
     commission: '',
@@ -82,100 +101,57 @@ export const DashboardPage: React.FC = () => {
     remarks: '',
   });
 
-  // Calculate dynamic sales trend data (last 6 months)
+  // ─── Chart helpers ────────────────────────────────────────────────────────
   const getLast6Months = () => {
     const months = [];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const today = new Date();
-    
     for (let i = 5; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      months.push({
-        month: monthNames[d.getMonth()],
-        year: d.getFullYear(),
-        monthIndex: d.getMonth(),
-        sales: 0
-      });
+      months.push({ month: monthNames[d.getMonth()], year: d.getFullYear(), monthIndex: d.getMonth(), sales: 0 });
     }
     return months;
   };
 
   const computeTrend = (goats: Goat[]) => {
     const trend = getLast6Months();
-    goats.forEach(goat => {
+    goats.forEach((goat) => {
       if (goat.status === 'sold' && goat.saleInfo) {
         const saleDate = new Date(goat.saleInfo.saleDate);
-        const saleMonth = saleDate.getMonth();
-        const saleYear = saleDate.getFullYear();
-        
-        const match = trend.find(m => m.monthIndex === saleMonth && m.year === saleYear);
-        if (match) {
-          match.sales += 1;
-        }
+        const match = trend.find((m) => m.monthIndex === saleDate.getMonth() && m.year === saleDate.getFullYear());
+        if (match) match.sales += 1;
       }
     });
-    return trend.map(t => ({ month: t.month, sales: t.sales }));
+    return trend.map((t) => ({ month: t.month, sales: t.sales }));
   };
 
+  // ─── Load Data ─────────────────────────────────────────────────────────────
   const loadData = async () => {
     if (!user) return;
-
     try {
-      // 1. Instant local load from IndexedDB cache
+      setLoading(true);
+
+      // Show local data instantly first
       const localGoats = await indexedDB.getAllItems<Goat>('goats');
       const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
-      const active = farmerGoats.filter((g) => g.status === 'active');
-      const sold = farmerGoats.filter((g) => g.status === 'sold');
-      
-      const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-      const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
-      const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-
-      const now = new Date();
-      const weightDueCount = active.filter((g) => {
-        const w = localWeights.filter((wRecord) => wRecord.goatId === g.id);
-        return w.some((weight) => !weight.isRecorded && new Date(weight.dueDate) <= now);
-      }).length;
-
-      const pendingDewormingCount = active.filter((g) => {
-        const d = localDeworm.find((r) => r.goatId === g.id);
-        return !d;
-      }).length;
-
-      const pendingVaccinationCount = active.filter((g) => {
-        const v = localVacc.find((r) => r.goatId === g.id);
-        return !v;
-      }).length;
-
-      setStats({
-        totalGoats: farmerGoats.length,
-        activeGoats: active.length,
-        soldGoats: sold.length,
-        weightDue: weightDueCount,
-        pendingDeworming: pendingDewormingCount,
-        pendingVaccination: pendingVaccinationCount,
-      });
-      setGoatsList(active);
-      setSalesChartData(computeTrend(farmerGoats));
-
-      if (active.length > 0) {
-        setWeightForm((prev) => ({ ...prev, goatId: active[0].id }));
-        setVaccineForm((prev) => ({ ...prev, goatId: active[0].id }));
-        setDewormingForm((prev) => ({ ...prev, goatId: active[0].id }));
-        setSaleForm((prev) => ({ ...prev, goatId: active[0].id }));
-        setVaccineSearch(active[0].earTagNumber);
-        setDewormingSearch(active[0].earTagNumber);
+      if (farmerGoats.length > 0) {
+        const active = farmerGoats.filter((g) => g.status === 'active');
+        const sold = farmerGoats.filter((g) => g.status === 'sold');
+        setStats((prev) => ({ ...prev, totalGoats: farmerGoats.length, activeGoats: active.length, soldGoats: sold.length }));
+        setGoatsList(active);
+        setSalesChartData(computeTrend(farmerGoats));
+        setLoading(false);
       }
 
-      setLoading(false); // Snappy first load render!
-
-      // 2. Fetch fresh data in background from Sheets/Firestore
+      // Fresh fetch from Sheets
       const allGoats = await getFarmerGoats(user.id);
       const freshActive = allGoats.filter((g) => g.status === 'active');
       const freshSold = allGoats.filter((g) => g.status === 'sold');
-      const weightDue = await getGoatsDueForWeight(user.id);
-      const deworm = await getPendingDeworming(user.id);
-      const vacc = await getPendingVaccination(user.id);
+      const [weightDue, deworm, vacc] = await Promise.all([
+        getGoatsDueForWeight(user.id),
+        getPendingDeworming(user.id),
+        getPendingVaccination(user.id),
+      ]);
 
       setStats({
         totalGoats: allGoats.length,
@@ -186,7 +162,20 @@ export const DashboardPage: React.FC = () => {
         pendingVaccination: vacc.length,
       });
       setGoatsList(freshActive);
+      setWeightDueGoats(weightDue);
       setSalesChartData(computeTrend(allGoats));
+
+      if (freshActive.length > 0) {
+        const first = freshActive[0];
+        setVaccineSearch(first.earTagNumber);
+        setDewormingSearch(first.earTagNumber);
+        setWeightGoatSearch(first.earTagNumber);
+        setSaleGoatSearch(first.earTagNumber);
+        setVaccineForm((prev) => ({ ...prev, goatId: first.id }));
+        setDewormingForm((prev) => ({ ...prev, goatId: first.id }));
+        setWeightForm((prev) => ({ ...prev, goatId: first.id }));
+        setSaleForm((prev) => ({ ...prev, goatId: first.id }));
+      }
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
     } finally {
@@ -194,144 +183,152 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, [user]);
+  useEffect(() => { loadData(); }, [user]);
 
-  // Click outside listener to dismiss search dropdowns
+  // Click outside to close dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (vaccineRef.current && !vaccineRef.current.contains(event.target as Node)) {
-        setShowVaccineDropdown(false);
-      }
-      if (dewormingRef.current && !dewormingRef.current.contains(event.target as Node)) {
-        setShowDewormingDropdown(false);
-      }
+      if (vaccineRef.current && !vaccineRef.current.contains(event.target as Node)) setShowVaccineDropdown(false);
+      if (dewormingRef.current && !dewormingRef.current.contains(event.target as Node)) setShowDewormingDropdown(false);
+      if (weightRef.current && !weightRef.current.contains(event.target as Node)) setShowWeightGoatDropdown(false);
+      if (saleRef.current && !saleRef.current.contains(event.target as Node)) setShowSaleGoatDropdown(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Fetch previous weight when goat or weight number changes
+  useEffect(() => {
+    if (!weightForm.goatId || !weightForm.weightNumber) { setPrevWeight(null); return; }
+    const fetchPrev = async () => {
+      try {
+        const weights = await getGoatWeights(weightForm.goatId);
+        const wNum = parseInt(weightForm.weightNumber);
+        const prev = weights
+          .filter((w) => w.isRecorded && w.weight > 0 && w.weightNumber < wNum)
+          .sort((a, b) => b.weightNumber - a.weightNumber)[0];
+        setPrevWeight(prev ? prev.weight : null);
+      } catch {
+        setPrevWeight(null);
+      }
+    };
+    fetchPrev();
+  }, [weightForm.goatId, weightForm.weightNumber]);
+
+  // ─── Sale price auto-calculations ─────────────────────────────────────────
+  const handleSaleTotalPriceChange = (val: string) => {
+    const total = parseFloat(val);
+    const weight = parseFloat(saleForm.saleWeight);
+    const perKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
+    setSaleForm({ ...saleForm, saleTotalPrice: val, saleRatePerKg: perKg });
+  };
+
+  const handleSaleRatePerKgChange = (val: string) => {
+    const rate = parseFloat(val);
+    const weight = parseFloat(saleForm.saleWeight);
+    const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
+    setSaleForm({ ...saleForm, saleRatePerKg: val, saleTotalPrice: total });
+  };
+
+  const handleSaleWeightChange = (val: string) => {
+    const weight = parseFloat(val);
+    if (saleForm.saleRatePerKg) {
+      const rate = parseFloat(saleForm.saleRatePerKg);
+      const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
+      setSaleForm({ ...saleForm, saleWeight: val, saleTotalPrice: total });
+    } else if (saleForm.saleTotalPrice) {
+      const total = parseFloat(saleForm.saleTotalPrice);
+      const perKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
+      setSaleForm({ ...saleForm, saleWeight: val, saleRatePerKg: perKg });
+    } else {
+      setSaleForm({ ...saleForm, saleWeight: val });
+    }
+  };
+
+  // ─── Submit handlers ───────────────────────────────────────────────────────
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!weightForm.goatId) {
-      showToast('error', 'Please select a goat');
-      return;
-    }
+    if (!weightForm.goatId) { showToast('error', 'Please select a goat'); return; }
     const parsedWeight = parseFloat(weightForm.weight);
-    if (isNaN(parsedWeight) || parsedWeight <= 0) {
-      showToast('error', 'Please enter a valid weight');
-      return;
-    }
+    if (isNaN(parsedWeight) || parsedWeight <= 0) { showToast('error', 'Please enter a valid weight'); return; }
     setSubmitting(true);
     try {
       await recordWeight(weightForm.goatId, {
         goatId: weightForm.goatId,
         weightNumber: parseInt(weightForm.weightNumber) as any,
         weight: parsedWeight,
-        dueDate: new Date(), // overridden by existing placeholder in recordWeight
+        dueDate: new Date(),
         recordedDate: new Date(weightForm.recordedDate),
-        remarks: weightForm.remarks || undefined,
-        isRecorded: true
+        isRecorded: true,
       });
       showToast('success', 'Weight recorded successfully');
       setShowWeightModal(false);
-      setWeightForm({
-        goatId: goatsList[0]?.id || '',
-        weightNumber: '1',
-        weight: '',
-        recordedDate: new Date().toISOString().split('T')[0],
-        remarks: '',
-      });
+      setWeightForm({ goatId: goatsList[0]?.id || '', weightNumber: '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
+      setPrevWeight(null);
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record weight', error.message);
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   const handleVaccineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!vaccineForm.goatId) {
-      showToast('error', 'Please search and select a valid goat');
-      return;
-    }
+    if (!vaccineForm.goatId) { showToast('error', 'Please search and select a valid goat'); return; }
     setSubmitting(true);
     try {
       await recordVaccination(vaccineForm.goatId, {
         goatId: vaccineForm.goatId,
         vaccinationDate: new Date(vaccineForm.vaccinationDate),
-        status: 'vaccinated'
+        status: 'vaccinated',
       });
       showToast('success', 'Vaccination recorded successfully');
       setShowVaccineModal(false);
-      setVaccineForm({
-        goatId: goatsList[0]?.id || '',
-        vaccinationDate: new Date().toISOString().split('T')[0],
-      });
+      setVaccineForm({ goatId: goatsList[0]?.id || '', vaccinationDate: new Date().toISOString().split('T')[0] });
       setVaccineSearch(goatsList[0]?.earTagNumber || '');
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record vaccination', error.message);
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   const handleDewormingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dewormingForm.goatId) {
-      showToast('error', 'Please search and select a valid goat');
-      return;
-    }
+    if (!dewormingForm.goatId) { showToast('error', 'Please search and select a valid goat'); return; }
     setSubmitting(true);
     try {
       await recordDeworming(dewormingForm.goatId, {
         goatId: dewormingForm.goatId,
         dewormingDate: new Date(dewormingForm.dewormingDate),
-        status: 'dewormed'
+        status: 'dewormed',
       });
       showToast('success', 'Deworming recorded successfully');
       setShowDewormingModal(false);
-      setDewormingForm({
-        goatId: goatsList[0]?.id || '',
-        dewormingDate: new Date().toISOString().split('T')[0],
-      });
+      setDewormingForm({ goatId: goatsList[0]?.id || '', dewormingDate: new Date().toISOString().split('T')[0] });
       setDewormingSearch(goatsList[0]?.earTagNumber || '');
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record deworming', error.message);
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   const handleSaleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!saleForm.goatId) {
-      showToast('error', 'Please select a goat');
-      return;
-    }
-
+    if (!saleForm.goatId) { showToast('error', 'Please select a goat'); return; }
     const selectedGoat = goatsList.find((g) => g.id === saleForm.goatId);
     if (!selectedGoat) return;
 
     const saleWeight = parseFloat(saleForm.saleWeight);
     const saleRatePerKg = parseFloat(saleForm.saleRatePerKg);
-
     if (isNaN(saleWeight) || saleWeight <= 0 || isNaN(saleRatePerKg) || saleRatePerKg <= 0) {
       showToast('error', 'Please enter valid weight and rate');
       return;
     }
 
     setSubmitting(true);
-
     const saleAmount = saleWeight * saleRatePerKg;
     const commission = parseFloat(saleForm.commission) || 0;
     const transportCharges = parseFloat(saleForm.transportCharges) || 0;
     const otherCharges = parseFloat(saleForm.otherCharges) || 0;
-    
     const netProfit = saleAmount - selectedGoat.purchasePrice - (commission + transportCharges + otherCharges);
     const profitPercentage = selectedGoat.purchasePrice > 0 ? (netProfit / selectedGoat.purchasePrice) * 100 : 0;
 
@@ -351,41 +348,24 @@ export const DashboardPage: React.FC = () => {
         profitPercentage,
         remarks: saleForm.remarks || undefined,
       });
-
       showToast('success', 'Sale recorded successfully');
       setShowSaleModal(false);
       setSaleForm({
         goatId: goatsList[0]?.id || '',
         saleDate: new Date().toISOString().split('T')[0],
-        saleWeight: '',
-        saleRatePerKg: '',
-        buyerName: '',
-        buyerContact: '',
-        commission: '',
-        transportCharges: '',
-        otherCharges: '',
-        remarks: '',
+        saleWeight: '', saleRatePerKg: '', saleTotalPrice: '',
+        buyerName: '', buyerContact: '',
+        commission: '', transportCharges: '', otherCharges: '', remarks: '',
       });
       loadData();
     } catch (error: any) {
       showToast('error', 'Failed to record sale', error.message);
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
   };
 
   if (loading) return <LoadingSpinner message="Loading dashboard..." />;
 
-  const statCards = [
-    { title: 'Total Goats', value: stats.totalGoats, color: 'bg-blue-500' },
-    { title: 'Active Goats', value: stats.activeGoats, color: 'bg-green-500' },
-    { title: 'Sold Goats', value: stats.soldGoats, color: 'bg-purple-500' },
-    { title: 'Weight Due', value: stats.weightDue, color: 'bg-orange-500' },
-    { title: 'Pending Deworming', value: stats.pendingDeworming, color: 'bg-red-500' },
-    { title: 'Pending Vaccination', value: stats.pendingVaccination, color: 'bg-yellow-500' },
-  ];
-
-  // Helper values for live calculations in Sale Modal
+  // Live sale calculations
   const selectedGoatForSale = goatsList.find((g) => g.id === saleForm.goatId);
   const purchasePrice = selectedGoatForSale ? selectedGoatForSale.purchasePrice : 0;
   const saleWeightVal = parseFloat(saleForm.saleWeight) || 0;
@@ -396,31 +376,135 @@ export const DashboardPage: React.FC = () => {
   const computedOther = parseFloat(saleForm.otherCharges) || 0;
   const computedNetProfit = computedSaleAmount - purchasePrice - (computedCommission + computedTransport + computedOther);
 
+  // Weight gain display
+  const currentWeightVal = parseFloat(weightForm.weight) || 0;
+  const weightGainVal = prevWeight !== null && currentWeightVal > 0 ? currentWeightVal - prevWeight : null;
+
+  // Filtered weight due list
+  const filteredWeightDue = weightDueGoats.filter((item) =>
+    item.goat.earTagNumber.toLowerCase().includes(weightDueSearch.toLowerCase())
+  );
+
+  // Searchable dropdown helper
+  const GoatSearchDropdown = ({
+    refEl, searchVal, setSearch, showDropdown, setShowDropdown,
+    formGoatId, setFormGoatId, placeholder, id,
+  }: {
+    refEl: React.RefObject<HTMLDivElement | null>;
+    searchVal: string;
+    setSearch: (v: string) => void;
+    showDropdown: boolean;
+    setShowDropdown: (v: boolean) => void;
+    formGoatId: string;
+    setFormGoatId: (id: string, tag: string) => void;
+    placeholder: string;
+    id: string;
+  }) => (
+    <div ref={refEl} className="relative">
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <input
+          id={id}
+          className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+          placeholder={placeholder}
+          value={searchVal}
+          onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
+          onFocus={() => setShowDropdown(true)}
+          autoComplete="off"
+        />
+      </div>
+      {showDropdown && (
+        <div className="absolute z-20 w-full bg-card border border-input rounded-lg mt-1 max-h-44 overflow-y-auto shadow-xl">
+          {goatsList
+            .filter((g) => g.earTagNumber.toLowerCase().includes(searchVal.toLowerCase()))
+            .map((g) => (
+              <div
+                key={g.id}
+                className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent text-sm transition-colors ${g.id === formGoatId ? 'bg-primary/10 font-semibold' : ''}`}
+                onClick={() => { setFormGoatId(g.id, g.earTagNumber); setSearch(g.earTagNumber); setShowDropdown(false); }}
+              >
+                <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span>{g.earTagNumber}</span>
+                <span className="text-muted-foreground text-xs ml-auto">{g.variant}</span>
+              </div>
+            ))}
+          {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(searchVal.toLowerCase())).length === 0 && (
+            <div className="px-3 py-2.5 text-sm text-muted-foreground">No matching goats found</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // ─── Import Tag ────────────────────────────────────────────────────────────
+  const Tag = ({ className = '' }: { className?: string }) => (
+    <svg className={`lucide lucide-tag ${className}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+      <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+      <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+    </svg>
+  );
+
   return (
-    <div className="space-y-8 relative">
+    <div className="space-y-6 relative">
+      {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back, {user?.displayName}</p>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground mt-1">Welcome back, <span className="font-medium text-foreground">{user?.displayName}</span></p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {statCards.map((stat) => (
-          <Card key={stat.title}>
-            <CardContent className="pt-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">{stat.title}</p>
-                  <p className="text-3xl font-bold mt-2">{stat.value}</p>
-                </div>
-                <div className={`w-12 h-12 rounded-lg ${stat.color} opacity-20`} />
+      {/* ── Quick Actions (TOP) ───────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Quick Actions</h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: 'Register Goat', icon: <Plus className="h-5 w-5" />, color: 'bg-emerald-500 hover:bg-emerald-600 text-white', action: () => navigate('/goats/register') },
+            { label: 'Record Weight', icon: <Scale className="h-5 w-5" />, color: 'bg-cyan-500 hover:bg-cyan-600 text-white', action: () => setShowWeightModal(true), disabled: goatsList.length === 0 },
+            { label: 'Log Vaccine', icon: <Syringe className="h-5 w-5" />, color: 'bg-violet-500 hover:bg-violet-600 text-white', action: () => setShowVaccineModal(true), disabled: goatsList.length === 0 },
+            { label: 'Log Deworming', icon: <Bug className="h-5 w-5" />, color: 'bg-blue-500 hover:bg-blue-600 text-white', action: () => setShowDewormingModal(true), disabled: goatsList.length === 0 },
+            { label: 'Sell Goat', icon: <ShoppingCart className="h-5 w-5" />, color: 'bg-amber-500 hover:bg-amber-600 text-white', action: () => setShowSaleModal(true), disabled: goatsList.length === 0 },
+            { label: 'View All Goats', icon: <List className="h-5 w-5" />, color: 'bg-slate-600 hover:bg-slate-700 text-white', action: () => navigate('/goats') },
+          ].map(({ label, icon, color, action, disabled }) => (
+            <button
+              key={label}
+              onClick={action}
+              disabled={disabled}
+              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl font-medium text-sm transition-all duration-200 shadow-sm active:scale-95 ${color} disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100`}
+            >
+              {icon}
+              <span className="leading-tight text-center">{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Stats Grid ────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {[
+          { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: undefined },
+          { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', onClick: undefined },
+          { title: 'Sold', value: stats.soldGoats, gradient: 'from-amber-500/20 via-amber-500/10 to-transparent', border: 'border-amber-500/20', text: 'text-amber-600 dark:text-amber-400', onClick: undefined },
+          { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
+          { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
+          { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: undefined },
+        ].map((stat) => (
+          <div
+            key={stat.title}
+            onClick={stat.onClick}
+            className={`rounded-xl border ${stat.border} bg-gradient-to-br ${stat.gradient} p-4 backdrop-blur-sm transition-all duration-200 ${stat.onClick ? 'cursor-pointer hover:shadow-md hover:scale-[1.02] active:scale-[0.98]' : ''}`}
+          >
+            <p className="text-xs font-medium text-muted-foreground truncate">{stat.title}</p>
+            <p className={`text-3xl font-bold mt-1 ${stat.text}`}>{stat.value}</p>
+            {stat.onClick && (
+              <div className="flex items-center gap-1 mt-1">
+                <span className="text-xs text-muted-foreground">View list</span>
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </div>
         ))}
       </div>
 
-      {/* Charts */}
+      {/* ── Charts ────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -428,14 +512,14 @@ export const DashboardPage: React.FC = () => {
             <CardDescription>Goat sales over the last 6 months</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={250}>
               <LineChart data={salesChartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
+                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={2} />
+                <Line type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -447,112 +531,141 @@ export const DashboardPage: React.FC = () => {
             <CardDescription>Active vs Sold goats</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={250}>
               <BarChart data={[
                 { name: 'Active', value: stats.activeGoats },
                 { name: 'Sold', value: stats.soldGoats },
-              ]}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
+              ]} barSize={48}>
+                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Legend />
-                <Bar dataKey="value" fill="#10b981" />
+                <Bar dataKey="value" fill="#10b981" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-        <Button
-          variant="primary"
-          size="md"
-          className="w-full h-12"
-          onClick={() => navigate('/goats/register')}
-        >
-          Register New Goat
-        </Button>
-        <Button
-          variant="secondary"
-          size="md"
-          className="w-full h-12"
-          onClick={() => setShowWeightModal(true)}
-          disabled={goatsList.length === 0}
-        >
-          Record Weight
-        </Button>
-        <Button
-          variant="outline"
-          size="md"
-          className="w-full h-12 text-emerald-600 border-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-400"
-          onClick={() => setShowVaccineModal(true)}
-          disabled={goatsList.length === 0}
-        >
-          Log Vaccine
-        </Button>
-        <Button
-          variant="outline"
-          size="md"
-          className="w-full h-12 text-blue-600 border-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-400"
-          onClick={() => setShowDewormingModal(true)}
-          disabled={goatsList.length === 0}
-        >
-          Log Deworming
-        </Button>
-        <Button
-          variant="outline"
-          size="md"
-          className="w-full h-12 text-purple-600 border-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-400"
-          onClick={() => setShowSaleModal(true)}
-          disabled={goatsList.length === 0}
-        >
-          Sell Goat
-        </Button>
-        <Button
-          variant="outline"
-          size="md"
-          className="w-full h-12"
-          onClick={() => navigate('/goats')}
-        >
-          View All Goats
-        </Button>
-      </div>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          MODALS
+      ═══════════════════════════════════════════════════════════════════════ */}
 
-      {/* Weight Modal */}
+      {/* ── Weight Due Goats Modal ─────────────────────────────────────────── */}
+      {showWeightDueModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertCircle className="h-5 w-5 text-orange-500" />
+                    Weight Due
+                  </CardTitle>
+                  <CardDescription>{weightDueGoats.length} goat(s) need weight recording</CardDescription>
+                </div>
+                <button onClick={() => setShowWeightDueModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="Search goat by ear tag..."
+                  value={weightDueSearch}
+                  onChange={(e) => setWeightDueSearch(e.target.value)}
+                />
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                {filteredWeightDue.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No matching goats</p>
+                ) : filteredWeightDue.map(({ goat, weight }) => (
+                  <button
+                    key={goat.id + weight.weightNumber}
+                    className="w-full flex items-center justify-between p-3 rounded-lg border border-border hover:bg-accent hover:border-primary/30 transition-all text-left group"
+                    onClick={() => {
+                      setWeightForm({
+                        goatId: goat.id,
+                        weightNumber: String(weight.weightNumber),
+                        weight: '',
+                        recordedDate: new Date().toISOString().split('T')[0],
+                      });
+                      setWeightGoatSearch(goat.earTagNumber);
+                      setShowWeightDueModal(false);
+                      setShowWeightModal(true);
+                    }}
+                  >
+                    <div>
+                      <span className="font-semibold text-sm">{goat.earTagNumber}</span>
+                      <span className="text-xs text-muted-foreground ml-2">{goat.variant}</span>
+                      <p className="text-xs text-orange-500 mt-0.5">Weight {weight.weightNumber} overdue since {new Date(weight.dueDate).toLocaleDateString('en-IN')}</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Record Weight Modal ────────────────────────────────────────────── */}
       {showWeightModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
             <CardHeader>
-              <CardTitle>Record Weight</CardTitle>
-              <CardDescription>Enter monthly weight recording details</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Record Weight</CardTitle>
+                  <CardDescription>Enter monthly weight recording details</CardDescription>
+                </div>
+                <button onClick={() => setShowWeightModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleWeightSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="weightGoat">Select Goat (Ear Tag)</Label>
-                  <Select
-                    id="weightGoat"
-                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
-                    value={weightForm.goatId}
-                    onChange={(val) => setWeightForm({ ...weightForm, goatId: val })}
+                  <Label htmlFor="weightGoatSearch">Search Goat (Ear Tag)</Label>
+                  <GoatSearchDropdown
+                    refEl={weightRef}
+                    searchVal={weightGoatSearch}
+                    setSearch={setWeightGoatSearch}
+                    showDropdown={showWeightGoatDropdown}
+                    setShowDropdown={setShowWeightGoatDropdown}
+                    formGoatId={weightForm.goatId}
+                    setFormGoatId={(id, tag) => { setWeightForm({ ...weightForm, goatId: id }); setWeightGoatSearch(tag); }}
+                    placeholder="Type ear tag number..."
+                    id="weightGoatSearch"
                   />
                 </div>
+
                 <div>
                   <Label htmlFor="weightNumber">Select Month</Label>
-                  <Select
+                  <select
                     id="weightNumber"
-                    options={[
-                      { value: '1', label: '1st Month' },
-                      { value: '2', label: '2nd Month' },
-                      { value: '3', label: '3rd Month' },
-                      { value: '4', label: '4th Month' }
-                    ]}
+                    className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
                     value={weightForm.weightNumber}
-                    onChange={(val) => setWeightForm({ ...weightForm, weightNumber: val })}
-                  />
+                    onChange={(e) => setWeightForm({ ...weightForm, weightNumber: e.target.value })}
+                  >
+                    {[['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']].map(([v, l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
                 </div>
+
+                {prevWeight !== null && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/60 text-sm">
+                    <Scale className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground">Previous weight:</span>
+                    <span className="font-semibold">{prevWeight} kg</span>
+                  </div>
+                )}
+
                 <div>
                   <Label htmlFor="weight">Weight (kg)</Label>
                   <Input
@@ -564,7 +677,18 @@ export const DashboardPage: React.FC = () => {
                     onChange={(e) => setWeightForm({ ...weightForm, weight: e.target.value })}
                     required
                   />
+                  {/* Live weight gain display */}
+                  {weightGainVal !== null && weightForm.weight && (
+                    <div className={`flex items-center gap-1.5 mt-1.5 text-sm font-semibold ${weightGainVal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                      {weightGainVal >= 0
+                        ? <TrendingUp className="h-4 w-4" />
+                        : <TrendingDown className="h-4 w-4" />
+                      }
+                      Weight Gain: {weightGainVal >= 0 ? '+' : ''}{weightGainVal.toFixed(2)} kg
+                    </div>
+                  )}
                 </div>
+
                 <div>
                   <Label htmlFor="recordedDate">Date Recorded</Label>
                   <Input
@@ -575,22 +699,10 @@ export const DashboardPage: React.FC = () => {
                     required
                   />
                 </div>
-                <div>
-                  <Label htmlFor="weightRemarks">Remarks</Label>
-                  <Input
-                    id="weightRemarks"
-                    placeholder="Optional remarks"
-                    value={weightForm.remarks}
-                    onChange={(e) => setWeightForm({ ...weightForm, remarks: e.target.value })}
-                  />
-                </div>
-                <div className="flex justify-end gap-2 pt-4">
-                  <Button variant="outline" type="button" onClick={() => setShowWeightModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" type="submit" isLoading={submitting}>
-                    Record Weight
-                  </Button>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setShowWeightModal(false)}>Cancel</Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>Record Weight</Button>
                 </div>
               </form>
             </CardContent>
@@ -598,55 +710,37 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Vaccine Modal */}
+      {/* ── Vaccine Modal ──────────────────────────────────────────────────── */}
       {showVaccineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
             <CardHeader>
-              <CardTitle>Log Vaccine</CardTitle>
-              <CardDescription>Record a vaccination entry for a goat</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Log Vaccination</CardTitle>
+                  <CardDescription>Record a vaccination entry for a goat</CardDescription>
+                </div>
+                <button onClick={() => setShowVaccineModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleVaccineSubmit} className="space-y-4">
-                {/* Searchable Goat Selector */}
                 <div>
                   <Label htmlFor="vaccineGoatSearch">Search Goat (Ear Tag)</Label>
-                  <div ref={vaccineRef} className="relative mt-1">
-                    <Input
-                      id="vaccineGoatSearch"
-                      placeholder="Type ear tag number..."
-                      value={vaccineSearch}
-                      onChange={(e) => {
-                        setVaccineSearch(e.target.value);
-                        setShowVaccineDropdown(true);
-                      }}
-                      onFocus={() => setShowVaccineDropdown(true)}
-                    />
-                    {showVaccineDropdown && (
-                      <div className="absolute z-10 w-full bg-card border border-input rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
-                        {goatsList
-                          .filter((g) => g.earTagNumber.toLowerCase().includes(vaccineSearch.toLowerCase()))
-                          .map((g) => (
-                            <div
-                              key={g.id}
-                              className="px-3 py-2 cursor-pointer hover:bg-accent text-sm"
-                              onClick={() => {
-                                setVaccineForm({ ...vaccineForm, goatId: g.id });
-                                setVaccineSearch(g.earTagNumber);
-                                setShowVaccineDropdown(false);
-                              }}
-                            >
-                              {g.earTagNumber} ({g.variant})
-                            </div>
-                          ))}
-                        {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(vaccineSearch.toLowerCase())).length === 0 && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">No matching goats found</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <GoatSearchDropdown
+                    refEl={vaccineRef}
+                    searchVal={vaccineSearch}
+                    setSearch={setVaccineSearch}
+                    showDropdown={showVaccineDropdown}
+                    setShowDropdown={setShowVaccineDropdown}
+                    formGoatId={vaccineForm.goatId}
+                    setFormGoatId={(id, tag) => { setVaccineForm({ ...vaccineForm, goatId: id }); setVaccineSearch(tag); }}
+                    placeholder="Type ear tag number..."
+                    id="vaccineGoatSearch"
+                  />
                 </div>
-
                 <div>
                   <Label htmlFor="vaccineDate">Vaccination Date</Label>
                   <Input
@@ -657,14 +751,9 @@ export const DashboardPage: React.FC = () => {
                     required
                   />
                 </div>
-
-                <div className="flex justify-end gap-2 pt-4">
-                  <Button variant="outline" type="button" onClick={() => setShowVaccineModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" type="submit" isLoading={submitting}>
-                    Log Vaccine
-                  </Button>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setShowVaccineModal(false)}>Cancel</Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>Log Vaccination</Button>
                 </div>
               </form>
             </CardContent>
@@ -672,55 +761,37 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Deworming Modal */}
+      {/* ── Deworming Modal ────────────────────────────────────────────────── */}
       {showDewormingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
             <CardHeader>
-              <CardTitle>Log Deworming</CardTitle>
-              <CardDescription>Record a deworming entry for a goat</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Log Deworming</CardTitle>
+                  <CardDescription>Record a deworming entry for a goat</CardDescription>
+                </div>
+                <button onClick={() => setShowDewormingModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleDewormingSubmit} className="space-y-4">
-                {/* Searchable Goat Selector */}
                 <div>
                   <Label htmlFor="dewormingGoatSearch">Search Goat (Ear Tag)</Label>
-                  <div ref={dewormingRef} className="relative mt-1">
-                    <Input
-                      id="dewormingGoatSearch"
-                      placeholder="Type ear tag number..."
-                      value={dewormingSearch}
-                      onChange={(e) => {
-                        setDewormingSearch(e.target.value);
-                        setShowDewormingDropdown(true);
-                      }}
-                      onFocus={() => setShowDewormingDropdown(true)}
-                    />
-                    {showDewormingDropdown && (
-                      <div className="absolute z-10 w-full bg-card border border-input rounded-md mt-1 max-h-40 overflow-y-auto shadow-lg">
-                        {goatsList
-                          .filter((g) => g.earTagNumber.toLowerCase().includes(dewormingSearch.toLowerCase()))
-                          .map((g) => (
-                            <div
-                              key={g.id}
-                              className="px-3 py-2 cursor-pointer hover:bg-accent text-sm"
-                              onClick={() => {
-                                setDewormingForm({ ...dewormingForm, goatId: g.id });
-                                setDewormingSearch(g.earTagNumber);
-                                setShowDewormingDropdown(false);
-                              }}
-                            >
-                              {g.earTagNumber} ({g.variant})
-                            </div>
-                          ))}
-                        {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(dewormingSearch.toLowerCase())).length === 0 && (
-                          <div className="px-3 py-2 text-sm text-muted-foreground">No matching goats found</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <GoatSearchDropdown
+                    refEl={dewormingRef}
+                    searchVal={dewormingSearch}
+                    setSearch={setDewormingSearch}
+                    showDropdown={showDewormingDropdown}
+                    setShowDropdown={setShowDewormingDropdown}
+                    formGoatId={dewormingForm.goatId}
+                    setFormGoatId={(id, tag) => { setDewormingForm({ ...dewormingForm, goatId: id }); setDewormingSearch(tag); }}
+                    placeholder="Type ear tag number..."
+                    id="dewormingGoatSearch"
+                  />
                 </div>
-
                 <div>
                   <Label htmlFor="dewormingDate">Deworming Date</Label>
                   <Input
@@ -731,14 +802,9 @@ export const DashboardPage: React.FC = () => {
                     required
                   />
                 </div>
-
-                <div className="flex justify-end gap-2 pt-4">
-                  <Button variant="outline" type="button" onClick={() => setShowDewormingModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" type="submit" isLoading={submitting}>
-                    Log Deworming
-                  </Button>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setShowDewormingModal(false)}>Cancel</Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>Log Deworming</Button>
                 </div>
               </form>
             </CardContent>
@@ -746,52 +812,77 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Sell Goat Modal */}
+      {/* ── Sell Goat Modal ────────────────────────────────────────────────── */}
       {showSaleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
           <Card className="w-full max-w-md bg-card shadow-2xl my-8">
             <CardHeader>
-              <CardTitle>Sell Goat</CardTitle>
-              <CardDescription>Record sale details and calculate profit</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Sell Goat</CardTitle>
+                  <CardDescription>Record sale details and calculate profit</CardDescription>
+                </div>
+                <button onClick={() => setShowSaleModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSaleSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="saleGoat">Select Goat (Ear Tag)</Label>
-                  <Select
-                    id="saleGoat"
-                    options={goatsList.map((g) => ({ value: g.id, label: g.earTagNumber }))}
-                    value={saleForm.goatId}
-                    onChange={(val) => setSaleForm({ ...saleForm, goatId: val })}
+                  <Label htmlFor="saleGoatSearch">Search Goat (Ear Tag)</Label>
+                  <GoatSearchDropdown
+                    refEl={saleRef}
+                    searchVal={saleGoatSearch}
+                    setSearch={setSaleGoatSearch}
+                    showDropdown={showSaleGoatDropdown}
+                    setShowDropdown={setShowSaleGoatDropdown}
+                    formGoatId={saleForm.goatId}
+                    setFormGoatId={(id, tag) => { setSaleForm({ ...saleForm, goatId: id }); setSaleGoatSearch(tag); }}
+                    placeholder="Type ear tag number..."
+                    id="saleGoatSearch"
                   />
                 </div>
-                
-                <div className="grid grid-cols-2 gap-4">
+
+                <div>
+                  <Label htmlFor="saleWeight">Sale Weight (kg)</Label>
+                  <Input
+                    id="saleWeight"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={saleForm.saleWeight}
+                    onChange={(e) => handleSaleWeightChange(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {/* Bidirectional price calculation */}
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label htmlFor="saleWeight">Sale Weight (kg)</Label>
+                    <Label htmlFor="saleTotalPrice">Total Price (₹)</Label>
                     <Input
-                      id="saleWeight"
+                      id="saleTotalPrice"
                       type="number"
                       step="0.01"
                       placeholder="0.00"
-                      value={saleForm.saleWeight}
-                      onChange={(e) => setSaleForm({ ...saleForm, saleWeight: e.target.value })}
-                      required
+                      value={saleForm.saleTotalPrice}
+                      onChange={(e) => handleSaleTotalPriceChange(e.target.value)}
                     />
                   </div>
                   <div>
-                    <Label htmlFor="saleRatePerKg">Rate per kg (₹)</Label>
+                    <Label htmlFor="saleRatePerKg">Price per KG (₹)</Label>
                     <Input
                       id="saleRatePerKg"
                       type="number"
                       step="0.01"
                       placeholder="0.00"
                       value={saleForm.saleRatePerKg}
-                      onChange={(e) => setSaleForm({ ...saleForm, saleRatePerKg: e.target.value })}
-                      required
+                      onChange={(e) => handleSaleRatePerKgChange(e.target.value)}
                     />
                   </div>
                 </div>
+                <p className="text-xs text-muted-foreground -mt-2">Enter either Total Price or Price/KG — the other will auto-calculate.</p>
 
                 <div>
                   <Label htmlFor="buyerName">Buyer Name</Label>
@@ -817,33 +908,15 @@ export const DashboardPage: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <Label htmlFor="commission" className="text-xs">Commission (₹)</Label>
-                    <Input
-                      id="commission"
-                      type="number"
-                      placeholder="0"
-                      value={saleForm.commission}
-                      onChange={(e) => setSaleForm({ ...saleForm, commission: e.target.value })}
-                    />
+                    <Input id="commission" type="number" placeholder="0" value={saleForm.commission} onChange={(e) => setSaleForm({ ...saleForm, commission: e.target.value })} />
                   </div>
                   <div>
                     <Label htmlFor="transportCharges" className="text-xs">Transport (₹)</Label>
-                    <Input
-                      id="transportCharges"
-                      type="number"
-                      placeholder="0"
-                      value={saleForm.transportCharges}
-                      onChange={(e) => setSaleForm({ ...saleForm, transportCharges: e.target.value })}
-                    />
+                    <Input id="transportCharges" type="number" placeholder="0" value={saleForm.transportCharges} onChange={(e) => setSaleForm({ ...saleForm, transportCharges: e.target.value })} />
                   </div>
                   <div>
                     <Label htmlFor="otherCharges" className="text-xs">Other (₹)</Label>
-                    <Input
-                      id="otherCharges"
-                      type="number"
-                      placeholder="0"
-                      value={saleForm.otherCharges}
-                      onChange={(e) => setSaleForm({ ...saleForm, otherCharges: e.target.value })}
-                    />
+                    <Input id="otherCharges" type="number" placeholder="0" value={saleForm.otherCharges} onChange={(e) => setSaleForm({ ...saleForm, otherCharges: e.target.value })} />
                   </div>
                 </div>
 
@@ -858,40 +931,27 @@ export const DashboardPage: React.FC = () => {
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="saleRemarks">Remarks</Label>
-                  <Input
-                    id="saleRemarks"
-                    placeholder="Optional remarks"
-                    value={saleForm.remarks}
-                    onChange={(e) => setSaleForm({ ...saleForm, remarks: e.target.value })}
-                  />
-                </div>
-
-                <div className="bg-muted p-3 rounded-lg text-sm space-y-1">
+                {/* Live profit summary */}
+                <div className="rounded-xl bg-muted/60 border border-border p-4 space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span>Purchase Price:</span>
-                    <span className="font-semibold">₹{purchasePrice.toFixed(2)}</span>
+                    <span className="text-muted-foreground">Purchase Price:</span>
+                    <span className="font-semibold">₹{purchasePrice.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Sale Amount:</span>
-                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{computedSaleAmount.toFixed(2)}</span>
+                    <span className="text-muted-foreground">Sale Amount:</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{computedSaleAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
-                  <div className="flex justify-between border-t pt-1 border-dashed mt-1">
-                    <span>Net Profit:</span>
-                    <span className={`font-bold ${computedNetProfit >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      ₹{computedNetProfit.toFixed(2)}
+                  <div className="flex justify-between border-t border-dashed pt-2 mt-1">
+                    <span className="text-muted-foreground font-medium">Net Profit:</span>
+                    <span className={`font-bold text-base ${computedNetProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
+                      ₹{computedNetProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" type="button" onClick={() => setShowSaleModal(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" type="submit" isLoading={submitting}>
-                    Record Sale
-                  </Button>
+                  <Button variant="outline" type="button" onClick={() => setShowSaleModal(false)}>Cancel</Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>Record Sale</Button>
                 </div>
               </form>
             </CardContent>

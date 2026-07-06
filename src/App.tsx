@@ -10,6 +10,7 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { GoatRegistrationPage } from '@/pages/GoatRegistrationPage';
 import { GoatsListPage } from '@/pages/GoatsListPage';
+import { GoatDetailPage } from '@/pages/GoatDetailPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 
 export const App: React.FC = () => {
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
                         <Route path="/dashboard" element={<DashboardPage />} />
                         <Route path="/goats" element={<GoatsListPage />} />
                         <Route path="/goats/register" element={<GoatRegistrationPage />} />
+                        <Route path="/goats/:id" element={<GoatDetailPage />} />
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
                         <Route path="*" element={<NotFoundPage />} />
                       </Routes>
