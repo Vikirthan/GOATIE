@@ -94,10 +94,6 @@ export const DashboardPage: React.FC = () => {
     saleRatePerKg: '',
     saleTotalPrice: '',
     buyerName: '',
-    buyerContact: '',
-    commission: '',
-    transportCharges: '',
-    otherCharges: '',
     remarks: '',
   });
 
@@ -326,10 +322,7 @@ export const DashboardPage: React.FC = () => {
 
     setSubmitting(true);
     const saleAmount = saleWeight * saleRatePerKg;
-    const commission = parseFloat(saleForm.commission) || 0;
-    const transportCharges = parseFloat(saleForm.transportCharges) || 0;
-    const otherCharges = parseFloat(saleForm.otherCharges) || 0;
-    const netProfit = saleAmount - selectedGoat.purchasePrice - (commission + transportCharges + otherCharges);
+    const netProfit = saleAmount - selectedGoat.purchasePrice;
     const profitPercentage = selectedGoat.purchasePrice > 0 ? (netProfit / selectedGoat.purchasePrice) * 100 : 0;
 
     try {
@@ -339,11 +332,7 @@ export const DashboardPage: React.FC = () => {
         saleWeight,
         saleRatePerKg,
         buyerName: saleForm.buyerName,
-        buyerContact: saleForm.buyerContact || undefined,
         saleAmount,
-        commission: commission || undefined,
-        transportCharges: transportCharges || undefined,
-        otherCharges: otherCharges || undefined,
         netProfit,
         profitPercentage,
         remarks: saleForm.remarks || undefined,
@@ -354,8 +343,7 @@ export const DashboardPage: React.FC = () => {
         goatId: goatsList[0]?.id || '',
         saleDate: new Date().toISOString().split('T')[0],
         saleWeight: '', saleRatePerKg: '', saleTotalPrice: '',
-        buyerName: '', buyerContact: '',
-        commission: '', transportCharges: '', otherCharges: '', remarks: '',
+        buyerName: '', remarks: '',
       });
       loadData();
     } catch (error: any) {
@@ -371,10 +359,7 @@ export const DashboardPage: React.FC = () => {
   const saleWeightVal = parseFloat(saleForm.saleWeight) || 0;
   const saleRateVal = parseFloat(saleForm.saleRatePerKg) || 0;
   const computedSaleAmount = saleWeightVal * saleRateVal;
-  const computedCommission = parseFloat(saleForm.commission) || 0;
-  const computedTransport = parseFloat(saleForm.transportCharges) || 0;
-  const computedOther = parseFloat(saleForm.otherCharges) || 0;
-  const computedNetProfit = computedSaleAmount - purchasePrice - (computedCommission + computedTransport + computedOther);
+  const computedNetProfit = computedSaleAmount - purchasePrice;
 
   // Weight gain display
   const currentWeightVal = parseFloat(weightForm.weight) || 0;
@@ -893,31 +878,6 @@ export const DashboardPage: React.FC = () => {
                     onChange={(e) => setSaleForm({ ...saleForm, buyerName: e.target.value })}
                     required
                   />
-                </div>
-
-                <div>
-                  <Label htmlFor="buyerContact">Buyer Contact (Optional)</Label>
-                  <Input
-                    id="buyerContact"
-                    placeholder="Phone or email"
-                    value={saleForm.buyerContact}
-                    onChange={(e) => setSaleForm({ ...saleForm, buyerContact: e.target.value })}
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <Label htmlFor="commission" className="text-xs">Commission (₹)</Label>
-                    <Input id="commission" type="number" placeholder="0" value={saleForm.commission} onChange={(e) => setSaleForm({ ...saleForm, commission: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label htmlFor="transportCharges" className="text-xs">Transport (₹)</Label>
-                    <Input id="transportCharges" type="number" placeholder="0" value={saleForm.transportCharges} onChange={(e) => setSaleForm({ ...saleForm, transportCharges: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label htmlFor="otherCharges" className="text-xs">Other (₹)</Label>
-                    <Input id="otherCharges" type="number" placeholder="0" value={saleForm.otherCharges} onChange={(e) => setSaleForm({ ...saleForm, otherCharges: e.target.value })} />
-                  </div>
                 </div>
 
                 <div>
