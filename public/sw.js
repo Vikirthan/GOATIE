@@ -1,5 +1,5 @@
 // GOATIE Service Worker
-const CACHE_NAME = 'goatie-v1';
+const CACHE_NAME = 'goatie-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -32,40 +32,62 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event
 self.addEventListener('fetch', (event) => {
   // Skip POST requests and data URLs
   if (event.request.method !== 'GET' || event.request.url.includes('data:')) {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      if (response) {
-        return response;
-      }
+  // Network-First strategy for html/js/css/json files, Cache-First for static assets like images/fonts/svg
+  const isDocOrScript = 
+    event.request.mode === 'navigate' || 
+    event.request.url.includes('.html') || 
+    event.request.url.includes('.js') || 
+    event.request.url.includes('.css') || 
+    event.request.url.includes('.json');
 
-      return fetch(event.request).then((response) => {
-        // Don't cache non-successful responses
-        if (!response || response.status !== 200 || response.type !== 'basic') {
+  if (isDocOrScript) {
+    // Network first
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (!response || response.status !== 200 || response.type !== 'basic') {
+            return response;
+          }
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return response;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((response) => {
+            if (response) return response;
+            return new Response('Offline - cached page not available');
+          });
+        })
+    );
+  } else {
+    // Cache first
+    event.respondWith(
+      caches.match(event.request).then((response) => {
+        if (response) {
           return response;
         }
-
-        // Clone the response
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
+        return fetch(event.request).then((response) => {
+          if (!response || response.status !== 200 || response.type !== 'basic') {
+            return response;
+          }
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return response;
         });
-
-        return response;
-      }).catch(() => {
-        // Return offline page or cached response
-        return caches.match('/offline.html').catch(() => {
-          return new Response('Offline - cached page not available');
-        });
-      });
-    })
-  );
+      })
+    );
+  }
 });
 
 // Background sync for offline actions
