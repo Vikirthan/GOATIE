@@ -66,24 +66,24 @@ function parseItemDates<T>(item: any, dateFields: string[]): T {
 
 // Goats Sheet
 export async function getGoatsSheet(): Promise<Goat[]> {
-  const data = await callSheetsAPI('read', 'goats');
+  const data = await callSheetsAPI('read', 'Goats Data');
   return data.map((item: any) => parseItemDates<Goat>(item, GOAT_DATE_FIELDS));
 }
 
 export async function writeGoatSheet(goat: Goat): Promise<void> {
-  await callSheetsAPI('write', 'goats', goat);
+  await callSheetsAPI('write', 'Goats Data', goat);
 }
 
 export async function updateGoatSheet(goat: Goat): Promise<void> {
-  await callSheetsAPI('update', 'goats', goat);
+  await callSheetsAPI('update', 'Goats Data', goat);
 }
 
 export async function deleteGoatSheet(id: string): Promise<void> {
-  await callSheetsAPI('delete', 'goats', { id });
+  await callSheetsAPI('delete', 'Goats Data', { id });
 }
 
 export async function batchWriteGoatsSheet(goats: Goat[]): Promise<void> {
-  await callSheetsAPI('batchWrite', 'goats', goats);
+  await callSheetsAPI('batchWrite', 'Goats Data', goats);
 }
 
 // Weights Sheet
