@@ -17,12 +17,42 @@ import {
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { supabase } from '@/lib/supabase';
-import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
-import { Plus, Search, Download, Upload, Trash2, X, RefreshCw } from 'lucide-react';
+import { getAllWeights } from '@/services/supabaseService';
+import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
+import { Plus, Search, Download, Upload, Trash2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { exportGoatsToExcel, importGoatsFromExcel } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { showToast } from '@/components/common/Toast';
+
+/** Parse a weight filter expression:
+ *  "15+"  → { min: 15, max: Infinity }
+ *  "15-"  → { min: 0, max: 15 }
+ *  "10-20"→ { min: 10, max: 20 }
+ *  "15"   → { min: 15, max: 15 }
+ *  returns null when the expression is empty / invalid
+ */
+function parseWeightFilter(expr: string): { min: number; max: number } | null {
+  const s = expr.trim();
+  if (!s) return null;
+  // "15+" pattern
+  const plusMatch = s.match(/^(\d+(?:\.\d+)?)\+$/);
+  if (plusMatch) return { min: parseFloat(plusMatch[1]), max: Infinity };
+  // "15-" pattern (below)
+  const minusMatch = s.match(/^(\d+(?:\.\d+)?)-$/);
+  if (minusMatch) return { min: 0, max: parseFloat(minusMatch[1]) };
+  // "10-20" range pattern
+  const rangeMatch = s.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
+  if (rangeMatch) {
+    const lo = parseFloat(rangeMatch[1]);
+    const hi = parseFloat(rangeMatch[2]);
+    return lo <= hi ? { min: lo, max: hi } : { min: hi, max: lo };
+  }
+  // exact number
+  const exact = parseFloat(s);
+  if (!isNaN(exact)) return { min: exact, max: exact };
+  return null;
+}
 
 export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -34,8 +64,28 @@ export const GoatsListPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'sold'>('all');
+  const [weightFilter, setWeightFilter] = useState('');
   const [dewormingRecords, setDewormingRecords] = useState<DewormingRecord[]>([]);
   const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
+  const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
+
+  // Map goatId → latest recorded weight value
+  const latestWeightMap = React.useMemo(() => {
+    const map = new Map<string, number>();
+    // group by goatId, pick the highest weightNumber that isRecorded and weight > 0
+    const byGoat = new Map<string, WeightRecord[]>();
+    for (const wr of weightRecords) {
+      if (!byGoat.has(wr.goatId)) byGoat.set(wr.goatId, []);
+      byGoat.get(wr.goatId)!.push(wr);
+    }
+    byGoat.forEach((records, goatId) => {
+      const recorded = records
+        .filter((r) => r.isRecorded && r.weight > 0)
+        .sort((a, b) => b.weightNumber - a.weightNumber);
+      if (recorded.length > 0) map.set(goatId, recorded[0].weight);
+    });
+    return map;
+  }, [weightRecords]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -72,16 +122,18 @@ export const GoatsListPage: React.FC = () => {
         }
       }
 
-      // 2. Fresh load from Sheets
-      const [freshGoats, freshDeworm, freshVacc] = await Promise.all([
+      // 2. Fresh load from server
+      const [freshGoats, freshDeworm, freshVacc, freshWeights] = await Promise.all([
         getFarmerGoats(user.id),
         getAllDeworming(),
         getAllVaccinations(),
+        isSupabaseEnabled() ? getAllWeights() : Promise.resolve([] as WeightRecord[]),
       ]);
 
       setGoats(freshGoats);
       setDewormingRecords(freshDeworm);
       setVaccineRecords(freshVacc);
+      setWeightRecords(freshWeights);
     } catch (error) {
       console.error('Error loading goats:', error);
     } finally {
@@ -122,8 +174,15 @@ export const GoatsListPage: React.FC = () => {
         g.variant.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
+    const wf = parseWeightFilter(weightFilter);
+    if (wf) {
+      result = result.filter((g) => {
+        const currentWeight = latestWeightMap.get(g.id) ?? g.purchaseWeight;
+        return currentWeight >= wf.min && currentWeight <= wf.max;
+      });
+    }
     setFilteredGoats(result);
-  }, [goats, searchTerm, filter]);
+  }, [goats, searchTerm, filter, weightFilter, latestWeightMap]);
 
   const handleExportExcel = async () => {
     try {
@@ -271,36 +330,83 @@ export const GoatsListPage: React.FC = () => {
       </div>
 
       {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search by ear tag or variant..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 pr-10"
-          />
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder="Search by ear tag or variant..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 pr-10"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {(['all', 'active', 'sold'] as const).map((f) => (
+              <Button
+                key={f}
+                variant={filter === f ? 'primary' : 'outline'}
+                size="sm"
+                onClick={() => setFilter(f)}
+                className="capitalize"
+              >
+                {f === 'all' ? 'All' : f === 'active' ? 'Active' : 'Sold'}
+              </Button>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-2 shrink-0">
-          {(['all', 'active', 'sold'] as const).map((f) => (
-            <Button
-              key={f}
-              variant={filter === f ? 'primary' : 'outline'}
-              size="sm"
-              onClick={() => setFilter(f)}
-              className="capitalize"
-            >
-              {f === 'all' ? 'All' : f === 'active' ? 'Active' : 'Sold'}
-            </Button>
-          ))}
+
+        {/* Weight filter row */}
+        <div className="flex items-center gap-3">
+          <div className="relative w-56">
+            <Weight className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+            <Input
+              id="weight-filter-input"
+              placeholder="Weight: 15+  or  10-20  or  15-"
+              value={weightFilter}
+              onChange={(e) => setWeightFilter(e.target.value)}
+              className={`pl-10 pr-10 text-sm ${
+                weightFilter && !parseWeightFilter(weightFilter)
+                  ? 'border-red-400 focus:ring-red-400'
+                  : weightFilter && parseWeightFilter(weightFilter)
+                  ? 'border-emerald-400'
+                  : ''
+              }`}
+            />
+            {weightFilter && (
+              <button
+                onClick={() => setWeightFilter('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {weightFilter && parseWeightFilter(weightFilter) && (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+              {(() => {
+                const wf = parseWeightFilter(weightFilter)!;
+                if (wf.max === Infinity) return `Showing goats ≥ ${wf.min} kg`;
+                if (wf.min === 0 && weightFilter.trim().endsWith('-')) return `Showing goats ≤ ${wf.max} kg`;
+                if (wf.min === wf.max) return `Showing goats = ${wf.min} kg`;
+                return `Showing goats ${wf.min}–${wf.max} kg`;
+              })()}
+            </span>
+          )}
+          {weightFilter && !parseWeightFilter(weightFilter) && (
+            <span className="text-xs text-red-500 font-medium">Invalid format. Try: 15+  or  10-20  or  15-</span>
+          )}
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            Filter by current weight
+          </span>
         </div>
       </div>
 
@@ -354,7 +460,13 @@ export const GoatsListPage: React.FC = () => {
                         <td className="px-4 py-3.5 text-foreground whitespace-nowrap">{goat.variant}</td>
                         <td className="px-4 py-3.5 text-foreground whitespace-nowrap capitalize">{goat.gender}</td>
                         <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums">
-                          {goat.purchaseWeight} <span className="text-muted-foreground text-xs">kg</span>
+                          {latestWeightMap.get(goat.id) ?? goat.purchaseWeight}{' '}
+                          <span className="text-muted-foreground text-xs">kg</span>
+                          {latestWeightMap.has(goat.id) && latestWeightMap.get(goat.id) !== goat.purchaseWeight && (
+                            <span className="text-muted-foreground text-xs block leading-none">
+                              (was {goat.purchaseWeight})
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums font-medium">
                           ₹{goat.purchasePrice.toLocaleString('en-IN')}
@@ -445,8 +557,13 @@ export const GoatsListPage: React.FC = () => {
                     </p>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
                       <div>
-                        <span className="text-muted-foreground text-xs block mb-0.5">Weight</span>
-                        <span className="font-medium text-foreground tabular-nums">{goat.purchaseWeight} kg</span>
+                        <span className="text-muted-foreground text-xs block mb-0.5">Current Weight</span>
+                        <span className="font-medium text-foreground tabular-nums">
+                          {latestWeightMap.get(goat.id) ?? goat.purchaseWeight} kg
+                        </span>
+                        {latestWeightMap.has(goat.id) && latestWeightMap.get(goat.id) !== goat.purchaseWeight && (
+                          <span className="text-muted-foreground text-xs"> (was {goat.purchaseWeight} kg)</span>
+                        )}
                       </div>
                       <div>
                         <span className="text-muted-foreground text-xs block mb-0.5">Price</span>

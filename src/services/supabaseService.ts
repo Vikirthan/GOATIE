@@ -413,3 +413,14 @@ export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
     parseDates<PPRVaccinationRecord>(snakeToCamel(item), ['vaccinationDate', 'createdAt', 'updatedAt'])
   );
 }
+
+export async function getAllWeights(): Promise<WeightRecord[]> {
+  const { data, error } = await supabase
+    .from('weights')
+    .select('*')
+    .order('weight_number', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((item: any) =>
+    parseDates<WeightRecord>(snakeToCamel(item), ['dueDate', 'recordedDate', 'createdAt', 'updatedAt'])
+  );
+}
