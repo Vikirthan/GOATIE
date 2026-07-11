@@ -17,6 +17,11 @@ import { generateId } from '@/utils/helpers';
 import * as indexedDB from '@/lib/indexeddb';
 import * as sheetsService from './sheetsStorageService';
 import { showToast } from '@/components/common/Toast';
+import * as supabaseService from './supabaseService';
+
+export const isSupabaseEnabled = (): boolean => {
+  return !!import.meta.env.VITE_SUPABASE_URL;
+};
 
 // Determine if we should route to Sheets/IndexedDB instead of Firestore
 const useSheetsOrLocal = (): boolean => {
@@ -31,6 +36,9 @@ export async function createGoat(
   farmerId: string,
   goatData: Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'status'>
 ): Promise<string> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.createGoat(farmerId, goatData);
+  }
   const id = generateId();
   const now = new Date();
   const goat: Goat = {
@@ -112,6 +120,9 @@ export async function createGoat(
 }
 
 export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<void> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.updateGoat(goatId, data);
+  }
   if (useSheetsOrLocal()) {
     const existing = await indexedDB.getItem<Goat>('goats', goatId);
     if (existing) {
@@ -140,6 +151,9 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
 }
 
 export async function getGoat(goatId: string): Promise<Goat | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getGoat(goatId);
+  }
   if (useSheetsOrLocal()) {
     // Fetch fresh from Sheets if configured
     if (sheetsService.isSheetsConfigured()) {
@@ -163,6 +177,9 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
 }
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getGoatByEarTag(farmerId, earTagNumber);
+  }
   if (useSheetsOrLocal()) {
     // Fetch from Sheets for accuracy
     if (sheetsService.isSheetsConfigured()) {
@@ -198,6 +215,9 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
 }
 
 export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getFarmerGoats(farmerId, status);
+  }
   if (useSheetsOrLocal()) {
     // Fetch fresh from Sheets when configured
     if (sheetsService.isSheetsConfigured()) {
@@ -328,6 +348,9 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.deleteGoat(goatId);
+  }
   if (useSheetsOrLocal()) {
     await indexedDB.deleteItem('goats', goatId);
     if (sheetsService.isSheetsConfigured()) {
@@ -349,6 +372,9 @@ export async function recordWeight(
   goatId: string,
   weightData: Omit<WeightRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.recordWeight(goatId, weightData);
+  }
   const now = new Date();
 
   if (useSheetsOrLocal()) {
@@ -449,6 +475,9 @@ export async function recordWeight(
 }
 
 export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getGoatWeights(goatId);
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -476,6 +505,9 @@ export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
 }
 
 export async function getWeightRecord(goatId: string, weightNumber: number): Promise<WeightRecord | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getWeightRecord(goatId, weightNumber);
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -505,6 +537,9 @@ export async function recordDeworming(
   goatId: string,
   data: Omit<DewormingRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.recordDeworming(goatId, data);
+  }
   const id = generateId();
   const now = new Date();
 
@@ -539,6 +574,9 @@ export async function recordDeworming(
 }
 
 export async function getAllDewormingForGoat(goatId: string): Promise<DewormingRecord[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getAllDewormingForGoat(goatId);
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -557,6 +595,9 @@ export async function getAllDewormingForGoat(goatId: string): Promise<DewormingR
 }
 
 export async function getGoatDeworming(goatId: string): Promise<DewormingRecord | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getGoatDeworming(goatId);
+  }
   const all = await getAllDewormingForGoat(goatId);
   return all.length > 0 ? all[all.length - 1] : null;
 }
@@ -567,6 +608,9 @@ export async function recordVaccination(
   goatId: string,
   data: Omit<PPRVaccinationRecord, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.recordVaccination(goatId, data);
+  }
   const id = generateId();
   const now = new Date();
 
@@ -601,6 +645,9 @@ export async function recordVaccination(
 }
 
 export async function getAllVaccinationsForGoat(goatId: string): Promise<PPRVaccinationRecord[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getAllVaccinationsForGoat(goatId);
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -619,6 +666,9 @@ export async function getAllVaccinationsForGoat(goatId: string): Promise<PPRVacc
 }
 
 export async function getGoatVaccination(goatId: string): Promise<PPRVaccinationRecord | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getGoatVaccination(goatId);
+  }
   const all = await getAllVaccinationsForGoat(goatId);
   return all.length > 0 ? all[all.length - 1] : null;
 }
@@ -629,6 +679,9 @@ export async function recordSale(
   goatId: string,
   saleData: Omit<SaleInfo, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<string> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.recordSale(goatId, saleData);
+  }
   const id = generateId();
   const now = new Date();
   const sale: SaleInfo = {
@@ -667,6 +720,9 @@ export async function recordSale(
 }
 
 export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getSaleInfo(goatId);
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -752,6 +808,9 @@ export async function getPendingVaccination(farmerId: string): Promise<Goat[]> {
 }
 
 export async function getAllDeworming(): Promise<DewormingRecord[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getAllDeworming();
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {
@@ -772,6 +831,9 @@ export async function getAllDeworming(): Promise<DewormingRecord[]> {
 }
 
 export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getAllVaccinations();
+  }
   if (useSheetsOrLocal()) {
     if (sheetsService.isSheetsConfigured()) {
       try {

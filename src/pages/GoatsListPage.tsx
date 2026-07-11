@@ -12,9 +12,11 @@ import {
   recordVaccination,
   recordDeworming,
   recordSale,
-  deleteGoat
+  deleteGoat,
+  isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
+import { supabase } from '@/lib/supabase';
 import { Goat, DewormingRecord, PPRVaccinationRecord } from '@/types';
 import { Plus, Search, Download, Upload, Trash2, X, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
@@ -88,7 +90,28 @@ export const GoatsListPage: React.FC = () => {
     }
   };
 
-  useEffect(() => { loadGoatsList(); }, [user]);
+  useEffect(() => {
+    loadGoatsList();
+
+    if (isSupabaseEnabled()) {
+      const channel = supabase
+        .channel('public:goats-list')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
+          loadGoatsList();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
+          loadGoatsList();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, () => {
+          loadGoatsList();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
 
   useEffect(() => {
     let result = goats;

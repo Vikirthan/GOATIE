@@ -18,8 +18,10 @@ import {
   recordWeight,
   recordSale,
   getGoatWeights,
+  isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
+import { supabase } from '@/lib/supabase';
 import { Goat, WeightRecord } from '@/types';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
@@ -179,7 +181,34 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  useEffect(() => { loadData(); }, [user]);
+  useEffect(() => {
+    loadData();
+
+    if (isSupabaseEnabled()) {
+      const channel = supabase
+        .channel('public:dashboard')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'weights' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, () => {
+          loadData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
+          loadData();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [user]);
 
   // Click outside to close dropdowns
   useEffect(() => {
