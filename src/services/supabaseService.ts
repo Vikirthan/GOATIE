@@ -146,11 +146,10 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
   return mapGoatData(data);
 }
 
-export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
+export async function getGoatByEarTag(_farmerId: string, earTagNumber: string): Promise<Goat | null> {
   const { data, error } = await supabase
     .from('goats')
     .select('*, sales(*)')
-    .eq('farmer_id', farmerId)
     .eq('ear_tag_number', earTagNumber)
     .maybeSingle();
   if (error) throw error;
@@ -158,11 +157,10 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
   return mapGoatData(data);
 }
 
-export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
+export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
   let query = supabase
     .from('goats')
-    .select('*, sales(*)')
-    .eq('farmer_id', farmerId);
+    .select('*, sales(*)');
   if (status) {
     query = query.eq('status', status);
   }
