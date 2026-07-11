@@ -19,4 +19,7 @@ export default defineConfig({
     sourcemap: false,
     minify: 'terser',
   },
+  define: {
+    'import.meta.env.VITE_APP_BUILD_TIME': JSON.stringify(new Date().toISOString()),
+  },
 })

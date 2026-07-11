@@ -26,6 +26,15 @@ const DEMO_USER: User = {
   updatedAt: new Date('2026-06-27T00:00:00.000Z'),
 };
 
+const VIKI_USER: User = {
+  id: 'VIKI',
+  email: 'viki@goatie.com',
+  displayName: 'Viki',
+  role: 'farmer',
+  createdAt: new Date('2026-07-11T00:00:00.000Z'),
+  updatedAt: new Date('2026-07-11T00:00:00.000Z'),
+};
+
 type AuthCallback = (user: User | null) => void;
 const authListeners = new Set<AuthCallback>();
 
@@ -76,10 +85,16 @@ export async function registerWithEmail(email: string, password: string, display
 }
 
 export async function loginWithEmail(email: string, password: string): Promise<User> {
-  if (email.trim().toUpperCase() === DEMO_USERNAME && password === DEMO_PASSWORD) {
+  const normalizedEmail = email.trim().toUpperCase();
+  if (normalizedEmail === DEMO_USERNAME && password === DEMO_PASSWORD) {
     localStorage.setItem('goatie_logged_in_user', JSON.stringify(DEMO_USER));
     notifyAuthListeners(DEMO_USER);
     return DEMO_USER;
+  }
+  if (normalizedEmail === 'VIKI' && password === 'Viki') {
+    localStorage.setItem('goatie_logged_in_user', JSON.stringify(VIKI_USER));
+    notifyAuthListeners(VIKI_USER);
+    return VIKI_USER;
   }
   isFirebaseReady();
   const userCredential = await signInWithEmailAndPassword(auth!, email, password);

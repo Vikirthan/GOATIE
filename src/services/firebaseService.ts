@@ -16,6 +16,7 @@ import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } f
 import { generateId } from '@/utils/helpers';
 import * as indexedDB from '@/lib/indexeddb';
 import * as sheetsService from './sheetsStorageService';
+import { showToast } from '@/components/common/Toast';
 
 // Determine if we should route to Sheets/IndexedDB instead of Firestore
 const useSheetsOrLocal = (): boolean => {
@@ -95,7 +96,7 @@ export async function createGoat(
         }
       } catch (err) {
         console.error('Error syncing createGoat to Google Sheets:', err);
-        // Don't throw — local data is saved, Sheets sync failure is non-fatal
+        showToast('warning', 'Google Sheets Sync Warning', 'Goat is saved locally, but failed to sync to Google Sheets. Ensure your Web App has permissions set to "Anyone".');
       }
     }
     return id;
@@ -295,6 +296,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
         return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       } catch (err) {
         console.error('Error fetching farmer goats from Sheets:', err);
+        showToast('error', 'Google Sheets Fetch Failed', 'Could not read from Google Sheets. Ensure your Web App is deployed with public access (Anyone). Falling back to local offline cache.');
       }
     }
 

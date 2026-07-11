@@ -11,11 +11,22 @@ initDB().catch(console.error)
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((registration) => {
-      console.log('Service Worker registered:', registration)
+      console.log('Service Worker registered:', registration);
+      
+      // Check for updates on register
+      registration.update();
     }).catch((error) => {
-      console.error('Service Worker registration failed:', error)
-    })
-  })
+      console.error('Service Worker registration failed:', error);
+    });
+  });
+
+  // Handle automatic reload when service worker updates
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

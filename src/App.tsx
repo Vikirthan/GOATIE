@@ -40,6 +40,35 @@ export const App: React.FC = () => {
                         <Route path="*" element={<NotFoundPage />} />
                       </Routes>
                     </main>
+                    <footer className="border-t py-4 text-center text-xs text-muted-foreground bg-muted/20">
+                      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+                        <span>&copy; {new Date().getFullYear()} GOATIE. All rights reserved.</span>
+                        {(() => {
+                          // @ts-ignore
+                          const buildTimeStr = import.meta.env.VITE_APP_BUILD_TIME;
+                          if (!buildTimeStr) return null;
+                          try {
+                            const date = new Date(buildTimeStr);
+                            const formatted = date.toLocaleString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true
+                            });
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span>V.1 Goatie • Deployment: {formatted}</span>
+                              </div>
+                            );
+                          } catch (e) {
+                            return null;
+                          }
+                        })()}
+                      </div>
+                    </footer>
                   </div>
                 </ProtectedRoute>
               }

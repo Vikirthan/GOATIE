@@ -19,10 +19,6 @@ async function callSheetsAPI(action: 'read' | 'write' | 'update' | 'delete' | 'b
       method: 'GET',
       mode: 'cors',
       cache: 'no-store',
-      headers: {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
-      },
     });
     if (!response.ok) {
       throw new Error(`Failed to read from Google Sheet: ${response.statusText}`);
