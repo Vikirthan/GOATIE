@@ -11,6 +11,7 @@ import {
   getAllVaccinations,
   recordVaccination,
   recordDeworming,
+  recordWeight,
   recordSale,
   deleteGoat,
   isSupabaseEnabled,
@@ -21,7 +22,7 @@ import { getAllWeights } from '@/services/supabaseService';
 import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
 import { Plus, Search, Download, Upload, Trash2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
-import { exportGoatsToExcel, importGoatsFromExcel } from '@/utils/excelHelper';
+import { exportGoatsToExcel, importFullExcelData } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { showToast } from '@/components/common/Toast';
 
@@ -151,6 +152,9 @@ export const GoatsListPage: React.FC = () => {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
           loadGoatsList();
         })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'weights' }, () => {
+          loadGoatsList();
+        })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
           loadGoatsList();
         })
@@ -184,34 +188,54 @@ export const GoatsListPage: React.FC = () => {
     setFilteredGoats(result);
   }, [goats, searchTerm, filter, weightFilter, latestWeightMap]);
 
+  // ── Export: passes all loaded data so the 4-sheet workbook is complete ──
   const handleExportExcel = async () => {
     try {
       if (goats.length === 0) { showToast('warning', 'No goats to export'); return; }
-      await exportGoatsToExcel(goats);
-      showToast('success', 'Excel exported successfully');
+      showToast('info', 'Preparing export…', 'Building all 4 sheets');
+      // Collect sales from saleInfo embedded in goats
+      const sales = goats.flatMap((g) => g.saleInfo ? [g.saleInfo] : []);
+      await exportGoatsToExcel({
+        goats,
+        weights: weightRecords,
+        dewormings: dewormingRecords,
+        vaccinations: vaccineRecords,
+        sales,
+      });
+      showToast('success', 'Excel exported!', '4 sheets: Goats, Weights, Deworming, Vaccination');
     } catch (error: any) {
-      showToast('error', 'Failed to export Excel', error.message);
+      showToast('error', 'Export failed', error.message);
     }
   };
 
+  // ── Full Import: reads all 4 sheets and upserts into Supabase ──
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     setImporting(true);
     try {
-      const parsedGoats = await importGoatsFromExcel(file);
+      const { goats: parsedGoats, weights: parsedWeights, dewormings: parsedDeworm, vaccinations: parsedVacc } =
+        await importFullExcelData(file);
+
       if (parsedGoats.length === 0) {
-        showToast('warning', 'No valid goat records found in the Excel file');
+        showToast('warning', 'No goat records found in Goats Data sheet');
         setImporting(false);
         return;
       }
 
-      let importedCount = 0;
-      let skippedCount = 0;
+      let goatsImported = 0, goatsSkipped = 0;
+      let weightsImported = 0, dewormImported = 0, vaccImported = 0;
+
+      // Map earTag → goatId (new + existing)
+      const earTagToId = new Map<string, string>();
 
       for (const pg of parsedGoats) {
         const existing = await getGoatByEarTag(user.id, pg.earTagNumber);
-        if (existing) { skippedCount++; continue; }
+        if (existing) {
+          earTagToId.set(pg.earTagNumber, existing.id);
+          goatsSkipped++;
+          continue;
+        }
 
         const qrCode = await generateQRCode(pg.earTagNumber);
         const barcode = generateBarcode(pg.earTagNumber);
@@ -223,13 +247,15 @@ export const GoatsListPage: React.FC = () => {
           variant: pg.variant,
           gender: pg.gender,
           purchasePrice: pg.purchasePrice,
-          sellerName: pg.sellerName,
+          sellerName: pg.sellerName || 'N/A',
           notes: pg.notes,
           photoURL: pg.photoURL,
           qrCode,
-          barcode
+          barcode,
         });
+        earTagToId.set(pg.earTagNumber, goatId);
 
+        // Basic vaccination/deworming from Goats sheet (if no dedicated sheet rows)
         if (pg.vaccinationStatus === 'vaccinated') {
           await recordVaccination(goatId, { goatId, vaccinationDate: pg.purchaseDate || new Date(), status: 'vaccinated' });
         }
@@ -241,16 +267,82 @@ export const GoatsListPage: React.FC = () => {
           const netProfit = saleAmount - pg.purchasePrice;
           const profitPercentage = pg.purchasePrice > 0 ? (netProfit / pg.purchasePrice) * 100 : 0;
           await recordSale(goatId, {
-            goatId, saleDate: pg.saleDate || pg.purchaseDate || new Date(),
-            saleWeight: pg.saleWeight, saleRatePerKg: pg.saleRatePerKg,
-            buyerName: pg.buyerName, buyerContact: pg.buyerContact,
-            saleAmount, netProfit, profitPercentage, remarks: pg.remarks,
+            goatId,
+            saleDate: pg.saleDate || pg.purchaseDate || new Date(),
+            saleWeight: pg.saleWeight,
+            saleRatePerKg: pg.saleRatePerKg,
+            buyerName: pg.buyerName,
+            buyerContact: pg.buyerContact,
+            saleAmount,
+            netProfit,
+            profitPercentage,
+            remarks: pg.remarks,
           });
         }
-        importedCount++;
+        goatsImported++;
       }
 
-      showToast('success', 'Import completed!', `Imported: ${importedCount}, Skipped: ${skippedCount}`);
+      // ── Insert weight records from Monthly Weights sheet (skip W0, already set) ──
+      for (const pw of parsedWeights) {
+        const goatId = earTagToId.get(pw.earTagNumber);
+        if (!goatId || pw.weightNumber === 0) continue; // W0 = purchase weight, already recorded
+        try {
+          await recordWeight(goatId, {
+            goatId,
+            weightNumber: pw.weightNumber as 0 | 1 | 2 | 3 | 4,
+            weight: pw.weight,
+            dueDate: pw.dueDate || new Date(),
+            recordedDate: pw.recordedDate,
+            remarks: pw.remarks,
+            isRecorded: true,
+          });
+          weightsImported++;
+        } catch { /* skip duplicates */ }
+      }
+
+      // ── Insert deworming records from Deworming sheet ──
+      for (const pd of parsedDeworm) {
+        const goatId = earTagToId.get(pd.earTagNumber);
+        if (!goatId) continue;
+        try {
+          await recordDeworming(goatId, {
+            goatId,
+            dewormingDate: pd.dewormingDate,
+            roundNumber: pd.roundNumber,
+            medicineUsed: pd.medicineUsed,
+            administeredBy: pd.administeredBy,
+            batchNumber: pd.batchNumber,
+            remarks: pd.remarks,
+            status: 'dewormed',
+          });
+          dewormImported++;
+        } catch { /* skip duplicates */ }
+      }
+
+      // ── Insert vaccination records from Vaccination sheet ──
+      for (const pv of parsedVacc) {
+        const goatId = earTagToId.get(pv.earTagNumber);
+        if (!goatId) continue;
+        try {
+          await recordVaccination(goatId, {
+            goatId,
+            vaccinationDate: pv.vaccinationDate,
+            roundNumber: pv.roundNumber,
+            vaccineBrand: pv.vaccineBrand,
+            administeredBy: pv.administeredBy,
+            batchNumber: pv.batchNumber,
+            remarks: pv.remarks,
+            status: 'vaccinated',
+          });
+          vaccImported++;
+        } catch { /* skip duplicates */ }
+      }
+
+      showToast(
+        'success',
+        'Import completed!',
+        `Goats: ${goatsImported} new (${goatsSkipped} skipped) · Weights: ${weightsImported} · Deworming: ${dewormImported} · Vaccination: ${vaccImported}`
+      );
       await loadGoatsList();
     } catch (error: any) {
       showToast('error', 'Import failed', error.message);
