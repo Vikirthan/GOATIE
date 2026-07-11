@@ -4,6 +4,9 @@ import { generateId } from '@/utils/helpers';
 
 // Helper: Convert camelCase properties to snake_case for PostgreSQL insertion/update
 export function camelToSnake(obj: any): any {
+  if (obj instanceof Date) {
+    return obj;
+  }
   if (Array.isArray(obj)) {
     return obj.map(camelToSnake);
   } else if (obj !== null && typeof obj === 'object') {
@@ -18,6 +21,9 @@ export function camelToSnake(obj: any): any {
 
 // Helper: Convert snake_case properties back to camelCase for TypeScript consumption
 export function snakeToCamel(obj: any): any {
+  if (obj instanceof Date) {
+    return obj;
+  }
   if (Array.isArray(obj)) {
     return obj.map(snakeToCamel);
   } else if (obj !== null && typeof obj === 'object') {
