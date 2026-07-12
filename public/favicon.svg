@@ -1,32 +1,30 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Green background -->
-  <rect width="512" height="512" rx="96" fill="#22c55e"/>
-  <!-- Goat head - stylized flat design -->
-  <!-- Body/Head oval -->
-  <ellipse cx="256" cy="290" rx="130" ry="110" fill="white"/>
-  <!-- Face circle -->
-  <ellipse cx="256" cy="260" rx="100" ry="95" fill="white"/>
-  <!-- Left horn -->
-  <path d="M185 185 Q165 130 190 100 Q200 140 210 170 Z" fill="white"/>
-  <!-- Right horn -->
-  <path d="M327 185 Q347 130 322 100 Q312 140 302 170 Z" fill="white"/>
-  <!-- Left ear -->
-  <ellipse cx="160" cy="230" rx="28" ry="18" fill="white" transform="rotate(-20,160,230)"/>
-  <!-- Right ear -->
-  <ellipse cx="352" cy="230" rx="28" ry="18" fill="white" transform="rotate(20,352,230)"/>
-  <!-- Eyes -->
-  <ellipse cx="218" cy="250" rx="14" ry="10" fill="#166534"/>
-  <ellipse cx="294" cy="250" rx="14" ry="10" fill="#166534"/>
-  <!-- Pupils -->
-  <ellipse cx="218" cy="251" rx="7" ry="5" fill="#14532d"/>
-  <ellipse cx="294" cy="251" rx="7" ry="5" fill="#14532d"/>
-  <!-- Nose -->
-  <ellipse cx="256" cy="295" rx="28" ry="18" fill="#bbf7d0"/>
-  <!-- Nostrils -->
-  <ellipse cx="244" cy="296" rx="5" ry="6" fill="#166534"/>
-  <ellipse cx="268" cy="296" rx="5" ry="6" fill="#166534"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Background -->
+  <rect width="100" height="100" rx="20" fill="#22c55e" />
+  
+  <!-- Horns -->
+  <path d="M 38 32 C 35 15 25 10 20 10 C 25 20 35 25 43 32 Z" fill="#ffffff" />
+  <path d="M 62 32 C 65 15 75 10 80 10 C 75 20 65 25 57 32 Z" fill="#ffffff" />
+  
+  <!-- Floppy Ears -->
+  <path d="M 28 45 C 15 45 5 65 15 70 C 20 70 25 60 30 55 Z" fill="#ffffff" />
+  <path d="M 72 45 C 85 45 95 65 85 70 C 80 70 75 60 70 55 Z" fill="#ffffff" />
+  
+  <!-- Goat Head Shape (narrower at bottom) -->
+  <path d="M 50 82 C 35 82 28 65 28 48 C 28 35 38 28 50 28 C 62 28 72 35 72 48 C 72 65 65 82 50 82 Z" fill="#ffffff" />
+  
+  <!-- Eyes (slanted pupils typical for goats) -->
+  <circle cx="38" cy="48" r="4" fill="#000000" />
+  <rect x="35" y="47" width="6" height="2" fill="#ffffff" />
+  
+  <circle cx="62" cy="48" r="4" fill="#000000" />
+  <rect x="59" y="47" width="6" height="2" fill="#ffffff" />
+  
+  <!-- Nose/Mouth -->
+  <path d="M 45 68 Q 50 72 55 68" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" />
+  <circle cx="47" cy="65" r="1.5" fill="#22c55e" />
+  <circle cx="53" cy="65" r="1.5" fill="#22c55e" />
+  
   <!-- Beard -->
-  <ellipse cx="256" cy="368" rx="22" ry="32" fill="white"/>
-  <ellipse cx="235" cy="360" rx="14" ry="26" fill="white"/>
-  <ellipse cx="277" cy="360" rx="14" ry="26" fill="white"/>
+  <path d="M 45 80 L 50 95 L 55 80 Z" fill="#ffffff" />
 </svg>

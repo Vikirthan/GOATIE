@@ -173,19 +173,32 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
 }
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
-  // Query all goats with this ear tag to avoid the "multiple rows" error from maybeSingle()
-  const { data, error } = await supabase
-    .from('goats')
-    .select('*, sales(*)')
-    .eq('ear_tag_number', earTagNumber)
-    .eq('farmer_id', farmerId);
+  // If offline, bypass the unique ear tag check so it can be queued
+  if (!navigator.onLine) {
+    return null;
+  }
+
+  try {
+    // Query all goats with this ear tag to avoid the "multiple rows" error from maybeSingle()
+    const { data, error } = await supabase
+      .from('goats')
+      .select('*, sales(*)')
+      .eq('ear_tag_number', earTagNumber)
+      .eq('farmer_id', farmerId);
+      
+    if (error) throw error;
+    if (!data || data.length === 0) return null;
     
-  if (error) throw error;
-  if (!data || data.length === 0) return null;
-  
-  // Find the active one, or just return the first one if none are active
-  const activeGoat = data.find(g => g.status === 'active') || data[0];
-  return mapGoatData(activeGoat);
+    // Find the active one, or just return the first one if none are active
+    const activeGoat = data.find(g => g.status === 'active') || data[0];
+    return mapGoatData(activeGoat);
+  } catch (err: any) {
+    // If it fails due to network issues, allow the flow to proceed to offline queueing
+    if (err.message === 'Failed to fetch' || err.message?.includes('fetch')) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
