@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { Navbar } from '@/components/common/Navbar';
 import { ToastContainer } from '@/components/common/Toast';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { InstallPrompt } from '@/components/common/InstallPrompt';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -76,6 +77,7 @@ export const App: React.FC = () => {
           </Routes>
 
           <ToastContainer />
+          <InstallPrompt />
         </AuthProvider>
       </ThemeProvider>
     </Router>

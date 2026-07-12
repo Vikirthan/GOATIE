@@ -1,7 +1,7 @@
 {
-  "name": "GOATIE - Professional Goat Farm Management System",
+  "name": "GOATIE - Goat Farm Manager",
   "short_name": "GOATIE",
-  "description": "A comprehensive Progressive Web App for managing goat farms with real-time notifications, offline support, and analytics.",
+  "description": "Professional goat farm management with offline support and real-time sync.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -9,20 +9,6 @@
   "background_color": "#ffffff",
   "theme_color": "#22c55e",
   "categories": ["productivity", "business"],
-  "screenshots": [
-    {
-      "src": "/screenshots/screenshot-540x720.png",
-      "sizes": "540x720",
-      "type": "image/png",
-      "form_factor": "narrow"
-    },
-    {
-      "src": "/screenshots/screenshot-1280x800.png",
-      "sizes": "1280x800",
-      "type": "image/png",
-      "form_factor": "wide"
-    }
-  ],
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
@@ -49,58 +35,40 @@
       "purpose": "maskable"
     }
   ],
+  "screenshots": [
+    {
+      "src": "/screenshots/screenshot-540x720.png",
+      "sizes": "540x720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "GOATIE Dashboard on mobile"
+    },
+    {
+      "src": "/screenshots/screenshot-1280x800.png",
+      "sizes": "1280x800",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "GOATIE Dashboard on desktop"
+    }
+  ],
   "shortcuts": [
     {
       "name": "Dashboard",
       "short_name": "Dashboard",
       "description": "View your goat farm dashboard",
-      "url": "/dashboard",
-      "icons": [
-        {
-          "src": "/icons/dashboard.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
+      "url": "/dashboard"
     },
     {
       "name": "Register Goat",
       "short_name": "Register",
       "description": "Register a new goat",
-      "url": "/goats/register",
-      "icons": [
-        {
-          "src": "/icons/register.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
+      "url": "/goats/register"
     },
     {
       "name": "My Goats",
       "short_name": "Goats",
       "description": "View all goats",
-      "url": "/goats",
-      "icons": [
-        {
-          "src": "/icons/goats.png",
-          "sizes": "96x96",
-          "type": "image/png"
-        }
-      ]
+      "url": "/goats"
     }
-  ],
-  "share_target": {
-    "action": "/share",
-    "method": "POST",
-    "enctype": "multipart/form-data",
-    "params": {
-      "files": [
-        {
-          "name": "media",
-          "accept": ["image/*", "video/*"]
-        }
-      ]
-    }
-  }
+  ]
 }
