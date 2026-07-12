@@ -158,6 +158,14 @@ export const DashboardPage: React.FC = () => {
     remarks: '',
   });
 
+  const getNextAvailableMonth = (goatId: string, weights: WeightRecord[]) => {
+    const goatWeights = weights.filter(w => w.goatId === goatId && w.isRecorded);
+    const recordedMonths = goatWeights.map(w => Number(w.weightNumber));
+    const available = [['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
+      .filter(([v]) => !recordedMonths.includes(Number(v)));
+    return available.length > 0 ? available[0][0] : '1';
+  };
+
   const getLast6Months = () => {
     const months = [];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -249,7 +257,7 @@ export const DashboardPage: React.FC = () => {
         const first = freshActive[0];
         setWeightGoatSearch(first.earTagNumber);
         setSaleGoatSearch(first.earTagNumber);
-        setWeightForm((prev) => ({ ...prev, goatId: first.id }));
+        setWeightForm((prev) => ({ ...prev, goatId: first.id, weightNumber: getNextAvailableMonth(first.id, localWeights) }));
         setSaleForm((prev) => ({ ...prev, goatId: first.id }));
       }
       if (vacc.length > 0) {
@@ -376,7 +384,7 @@ export const DashboardPage: React.FC = () => {
       });
       showToast('success', 'Weight recorded successfully');
       setShowWeightModal(false);
-      setWeightForm({ goatId: goatsList[0]?.id || '', weightNumber: '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
+      setWeightForm({ goatId: goatsList[0]?.id || '', weightNumber: goatsList[0] ? getNextAvailableMonth(goatsList[0].id, allWeights) : '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
       setPrevWeight(null);
       loadData();
     } catch (error: any) {
@@ -671,13 +679,7 @@ export const DashboardPage: React.FC = () => {
                     setShowDropdown={setShowWeightGoatDropdown}
                     formGoatId={weightForm.goatId}
                     setFormGoatId={(id, tag) => { 
-                      const goatWeights = allWeights.filter(w => w.goatId === id && w.isRecorded);
-                      const recordedMonths = goatWeights.map(w => w.weightNumber);
-                      const available = [['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
-                        .filter(([v]) => !recordedMonths.includes(parseInt(v) as any));
-                      const nextMonth = available.length > 0 ? available[0][0] : '1';
-                      
-                      setWeightForm({ ...weightForm, goatId: id, weightNumber: nextMonth }); 
+                      setWeightForm({ ...weightForm, goatId: id, weightNumber: getNextAvailableMonth(id, allWeights) }); 
                       setWeightGoatSearch(tag); 
                     }}
                     placeholder="Type ear tag number..."
@@ -695,7 +697,7 @@ export const DashboardPage: React.FC = () => {
                     onChange={(e) => setWeightForm({ ...weightForm, weightNumber: e.target.value })}
                   >
                     {[['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
-                      .filter(([v]) => !allWeights.some(w => w.goatId === weightForm.goatId && w.isRecorded && w.weightNumber === parseInt(v)))
+                      .filter(([v]) => !allWeights.some(w => w.goatId === weightForm.goatId && w.isRecorded && Number(w.weightNumber) === Number(v)))
                       .map(([v, l]) => (
                       <option key={v} value={v}>{l}</option>
                     ))}
