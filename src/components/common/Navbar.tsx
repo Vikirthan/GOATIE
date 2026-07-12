@@ -31,9 +31,7 @@ export const Navbar: React.FC = () => {
             className="flex items-center gap-2 cursor-pointer hover:opacity-90 active:scale-95 transition-all"
             onClick={() => navigate('/')}
           >
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white font-bold">
-              G
-            </div>
+            <img src="/favicon.svg" alt="GOATIE Logo" className="w-8 h-8" />
             <span className="font-bold text-xl">GOATIE</span>
           </div>
 
