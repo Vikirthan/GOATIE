@@ -174,8 +174,8 @@ export const GoatsListPage: React.FC = () => {
     if (filter !== 'all') result = result.filter((g) => g.status === filter);
     if (searchTerm) {
       result = result.filter((g) =>
-        g.earTagNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        g.variant.toLowerCase().includes(searchTerm.toLowerCase())
+        String(g.earTagNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        String(g.variant || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     const wf = parseWeightFilter(weightFilter);

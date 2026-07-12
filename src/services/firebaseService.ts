@@ -755,9 +755,9 @@ export async function searchGoats(farmerId: string, searchTerm: string): Promise
 
   return allGoats.filter(
     (goat) =>
-      goat.earTagNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      goat.variant.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      goat.sellerName?.toLowerCase().includes(searchTerm.toLowerCase())
+      String(goat.earTagNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(goat.variant || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(goat.sellerName || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 }
 
