@@ -213,9 +213,9 @@ export const DashboardPage: React.FC = () => {
         const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
 
         if (goat.variant.toLowerCase() === 'semmari') {
-           semmariWeight += currentWeight;
+           semmariWeight += Number(currentWeight) || 0;
         } else if (goat.variant.toLowerCase() === 'velladu') {
-           velladuWeight += currentWeight;
+           velladuWeight += Number(currentWeight) || 0;
         }
       });
 

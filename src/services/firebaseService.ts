@@ -273,6 +273,8 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
         try {
           const freshWeights = await sheetsService.getWeightsSheet();
           const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+          
+          // Sync UP
           const unsyncedWeights = localWeights.filter(
             (lw) => lw.isRecorded && 
                     freshGoats.some((g) => g.id === lw.goatId && g.farmerId === farmerId) && 
@@ -282,8 +284,18 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
             await sheetsService.writeWeightSheet(uw).catch(() => {});
           }
 
+          // Sync DOWN
+          for (const fw of freshWeights) {
+            const lw = localWeights.find((l) => l.id === fw.id);
+            if (!lw || new Date(fw.updatedAt).getTime() >= new Date(lw.updatedAt).getTime()) {
+              await indexedDB.updateItem('weights', fw);
+            }
+          }
+
           const freshDewormings = await sheetsService.getDewormingSheet();
           const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
+          
+          // Sync UP
           const unsyncedDewormings = localDewormings.filter(
             (ld) => freshGoats.some((g) => g.id === ld.goatId && g.farmerId === farmerId) && 
                     !freshDewormings.some((fd) => fd.id === ld.id)
@@ -292,14 +304,42 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
             await sheetsService.writeDewormingSheet(ud).catch(() => {});
           }
 
+          // Sync DOWN
+          for (const fd of freshDewormings) {
+            const ld = localDewormings.find((l) => l.id === fd.id);
+            if (!ld || new Date(fd.updatedAt).getTime() >= new Date(ld.updatedAt).getTime()) {
+              await indexedDB.updateItem('deworming', fd);
+            }
+          }
+
           const freshVaccinations = await sheetsService.getVaccinationSheet();
           const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+          
+          // Sync UP
           const unsyncedVaccinations = localVaccinations.filter(
             (lv) => freshGoats.some((g) => g.id === lv.goatId && g.farmerId === farmerId) && 
                     !freshVaccinations.some((fv) => fv.id === lv.id)
           );
           for (const uv of unsyncedVaccinations) {
             await sheetsService.writeVaccinationSheet(uv).catch(() => {});
+          }
+
+          // Sync DOWN
+          for (const fv of freshVaccinations) {
+            const lv = localVaccinations.find((l) => l.id === fv.id);
+            if (!lv || new Date(fv.updatedAt).getTime() >= new Date(lv.updatedAt).getTime()) {
+              await indexedDB.updateItem('vaccination', fv);
+            }
+          }
+
+          const freshSales = await sheetsService.getSalesSheet();
+          const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
+          // Sync DOWN sales (UP is handled when goat status is set to sold in earlier logic)
+          for (const fs of freshSales) {
+            const ls = localSales.find((l) => l.id === fs.id);
+            if (!ls || new Date(fs.updatedAt).getTime() >= new Date(ls.updatedAt).getTime()) {
+              await indexedDB.updateItem('sales', fs);
+            }
           }
         } catch (subSyncErr) {
           console.error('Error syncing individual records:', subSyncErr);
@@ -479,17 +519,6 @@ export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
     return supabaseService.getGoatWeights(goatId);
   }
   if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const freshWeights = await sheetsService.getWeightsSheet();
-        for (const w of freshWeights) {
-          await indexedDB.updateItem('weights', w);
-        }
-        return freshWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
-      } catch (err) {
-        console.error('Error fetching weights from Sheets:', err);
-      }
-    }
     const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
     return localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
   }
@@ -509,14 +538,6 @@ export async function getWeightRecord(goatId: string, weightNumber: number): Pro
     return supabaseService.getWeightRecord(goatId, weightNumber);
   }
   if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const freshWeights = await sheetsService.getWeightsSheet();
-        return freshWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
-      } catch (err) {
-        console.error('Error fetching weight record from Sheets:', err);
-      }
-    }
     const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
     return localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
   }
@@ -578,14 +599,6 @@ export async function getAllDewormingForGoat(goatId: string): Promise<DewormingR
     return supabaseService.getAllDewormingForGoat(goatId);
   }
   if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const all = await sheetsService.getDewormingSheet();
-        return all.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
-      } catch (err) {
-        console.error('Error fetching deworming from Sheets:', err);
-      }
-    }
     const local = await indexedDB.getAllItems<DewormingRecord>('deworming');
     return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
   }
@@ -649,14 +662,6 @@ export async function getAllVaccinationsForGoat(goatId: string): Promise<PPRVacc
     return supabaseService.getAllVaccinationsForGoat(goatId);
   }
   if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const all = await sheetsService.getVaccinationSheet();
-        return all.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
-      } catch (err) {
-        console.error('Error fetching vaccinations from Sheets:', err);
-      }
-    }
     const local = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
     return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
   }
@@ -724,17 +729,6 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
     return supabaseService.getSaleInfo(goatId);
   }
   if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const freshSales = await sheetsService.getSalesSheet();
-        for (const s of freshSales) {
-          await indexedDB.updateItem('sales', s);
-        }
-        return freshSales.find((s) => s.goatId === goatId) || null;
-      } catch (err) {
-        console.error('Error fetching sales info from Sheets:', err);
-      }
-    }
     const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
     return localSales.find((s) => s.goatId === goatId) || null;
   }
