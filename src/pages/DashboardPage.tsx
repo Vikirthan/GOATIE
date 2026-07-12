@@ -25,8 +25,61 @@ import { supabase } from '@/lib/supabase';
 import { Goat, WeightRecord } from '@/types';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
-  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle
+  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag
 } from 'lucide-react';
+
+const GoatSearchDropdown = ({
+  refEl, searchVal, setSearch, showDropdown, setShowDropdown,
+  formGoatId, setFormGoatId, placeholder, id, goatsList
+}: {
+  refEl: React.RefObject<HTMLDivElement | null>;
+  searchVal: string;
+  setSearch: (v: string) => void;
+  showDropdown: boolean;
+  setShowDropdown: (v: boolean) => void;
+  formGoatId: string;
+  setFormGoatId: (id: string, tag: string) => void;
+  placeholder: string;
+  id: string;
+  goatsList: Goat[];
+}) => (
+  <div ref={refEl} className="relative">
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+      <input
+        id={id}
+        inputMode="numeric"
+        className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+        placeholder={placeholder}
+        value={searchVal}
+        onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
+        onFocus={() => setShowDropdown(true)}
+        autoComplete="off"
+      />
+    </div>
+    {showDropdown && (
+      <div className="absolute z-20 w-full bg-card border border-input rounded-lg mt-1 max-h-44 overflow-y-auto shadow-xl">
+        {goatsList
+          .filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase()))
+          .map((g) => (
+            <div
+              key={g.id}
+              className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent text-sm transition-colors ${g.id === formGoatId ? 'bg-primary/10 font-semibold' : ''}`}
+              onClick={() => { setFormGoatId(g.id, g.earTagNumber); setSearch(g.earTagNumber); setShowDropdown(false); }}
+            >
+              <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span>{g.earTagNumber}</span>
+              <span className="text-muted-foreground text-xs ml-auto">{g.variant}</span>
+            </div>
+          ))}
+        {goatsList.filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase())).length === 0 && (
+          <div className="px-3 py-2.5 text-sm text-muted-foreground">No matching goats found</div>
+        )}
+      </div>
+    )}
+  </div>
+);
+
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -95,11 +148,9 @@ export const DashboardPage: React.FC = () => {
     saleWeight: '',
     saleRatePerKg: '',
     saleTotalPrice: '',
-    buyerName: '',
     remarks: '',
   });
 
-  // ─── Chart helpers ────────────────────────────────────────────────────────
   const getLast6Months = () => {
     const months = [];
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -123,13 +174,11 @@ export const DashboardPage: React.FC = () => {
     return trend.map((t) => ({ month: t.month, sales: t.sales }));
   };
 
-  // ─── Load Data ─────────────────────────────────────────────────────────────
   const loadData = async () => {
     if (!user) return;
     try {
       setLoading(true);
 
-      // Show local data instantly first
       const localGoats = await indexedDB.getAllItems<Goat>('goats');
       const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
       if (farmerGoats.length > 0) {
@@ -141,7 +190,6 @@ export const DashboardPage: React.FC = () => {
         setLoading(false);
       }
 
-      // Fresh fetch from Sheets
       const allGoats = await getFarmerGoats(user.id);
       const freshActive = allGoats.filter((g) => g.status === 'active');
       const freshSold = allGoats.filter((g) => g.status === 'sold');
@@ -210,7 +258,6 @@ export const DashboardPage: React.FC = () => {
     }
   }, [user]);
 
-  // Click outside to close dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (vaccineRef.current && !vaccineRef.current.contains(event.target as Node)) setShowVaccineDropdown(false);
@@ -222,7 +269,6 @@ export const DashboardPage: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch previous weight when goat or weight number changes
   useEffect(() => {
     if (!weightForm.goatId || !weightForm.weightNumber) { setPrevWeight(null); return; }
     const fetchPrev = async () => {
@@ -240,7 +286,6 @@ export const DashboardPage: React.FC = () => {
     fetchPrev();
   }, [weightForm.goatId, weightForm.weightNumber]);
 
-  // ─── Sale price auto-calculations ─────────────────────────────────────────
   const handleSaleTotalPriceChange = (val: string) => {
     const total = parseFloat(val);
     const weight = parseFloat(saleForm.saleWeight);
@@ -270,7 +315,6 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  // ─── Submit handlers ───────────────────────────────────────────────────────
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!weightForm.goatId) { showToast('error', 'Please select a goat'); return; }
@@ -360,7 +404,6 @@ export const DashboardPage: React.FC = () => {
         saleDate: new Date(saleForm.saleDate),
         saleWeight,
         saleRatePerKg,
-        buyerName: saleForm.buyerName,
         saleAmount,
         netProfit,
         profitPercentage,
@@ -372,7 +415,7 @@ export const DashboardPage: React.FC = () => {
         goatId: goatsList[0]?.id || '',
         saleDate: new Date().toISOString().split('T')[0],
         saleWeight: '', saleRatePerKg: '', saleTotalPrice: '',
-        buyerName: '', remarks: '',
+        remarks: '',
       });
       loadData();
     } catch (error: any) {
@@ -382,7 +425,6 @@ export const DashboardPage: React.FC = () => {
 
   if (loading) return <LoadingSpinner message="Loading dashboard..." />;
 
-  // Live sale calculations
   const selectedGoatForSale = goatsList.find((g) => g.id === saleForm.goatId);
   const purchasePrice = selectedGoatForSale ? selectedGoatForSale.purchasePrice : 0;
   const saleWeightVal = parseFloat(saleForm.saleWeight) || 0;
@@ -390,83 +432,20 @@ export const DashboardPage: React.FC = () => {
   const computedSaleAmount = saleWeightVal * saleRateVal;
   const computedNetProfit = computedSaleAmount - purchasePrice;
 
-  // Weight gain display
   const currentWeightVal = parseFloat(weightForm.weight) || 0;
   const weightGainVal = prevWeight !== null && currentWeightVal > 0 ? currentWeightVal - prevWeight : null;
 
-  // Filtered weight due list
   const filteredWeightDue = weightDueGoats.filter((item) =>
     item.goat.earTagNumber.toLowerCase().includes(weightDueSearch.toLowerCase())
   );
 
-  // Searchable dropdown helper
-  const GoatSearchDropdown = ({
-    refEl, searchVal, setSearch, showDropdown, setShowDropdown,
-    formGoatId, setFormGoatId, placeholder, id,
-  }: {
-    refEl: React.RefObject<HTMLDivElement | null>;
-    searchVal: string;
-    setSearch: (v: string) => void;
-    showDropdown: boolean;
-    setShowDropdown: (v: boolean) => void;
-    formGoatId: string;
-    setFormGoatId: (id: string, tag: string) => void;
-    placeholder: string;
-    id: string;
-  }) => (
-    <div ref={refEl} className="relative">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-        <input
-          id={id}
-          className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
-          placeholder={placeholder}
-          value={searchVal}
-          onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
-          onFocus={() => setShowDropdown(true)}
-          autoComplete="off"
-        />
-      </div>
-      {showDropdown && (
-        <div className="absolute z-20 w-full bg-card border border-input rounded-lg mt-1 max-h-44 overflow-y-auto shadow-xl">
-          {goatsList
-            .filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase()))
-            .map((g) => (
-              <div
-                key={g.id}
-                className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer hover:bg-accent text-sm transition-colors ${g.id === formGoatId ? 'bg-primary/10 font-semibold' : ''}`}
-                onClick={() => { setFormGoatId(g.id, g.earTagNumber); setSearch(g.earTagNumber); setShowDropdown(false); }}
-              >
-                <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span>{g.earTagNumber}</span>
-                <span className="text-muted-foreground text-xs ml-auto">{g.variant}</span>
-              </div>
-            ))}
-          {goatsList.filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase())).length === 0 && (
-            <div className="px-3 py-2.5 text-sm text-muted-foreground">No matching goats found</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-
-  // ─── Import Tag ────────────────────────────────────────────────────────────
-  const Tag = ({ className = '' }: { className?: string }) => (
-    <svg className={`lucide lucide-tag ${className}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-      <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
-      <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
-    </svg>
-  );
-
   return (
     <div className="space-y-6 relative">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground mt-1">Welcome back, <span className="font-medium text-foreground">{user?.displayName}</span></p>
       </div>
 
-      {/* ── Quick Actions (TOP) ───────────────────────────────────────────── */}
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -491,11 +470,10 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Stats Grid ────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: undefined },
-          { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', onClick: undefined },
+          { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:emerald-400', onClick: undefined },
           { title: 'Sold', value: stats.soldGoats, gradient: 'from-amber-500/20 via-amber-500/10 to-transparent', border: 'border-amber-500/20', text: 'text-amber-600 dark:text-amber-400', onClick: undefined },
           { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
           { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
@@ -518,7 +496,6 @@ export const DashboardPage: React.FC = () => {
         ))}
       </div>
 
-      {/* ── Charts ────────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
@@ -561,11 +538,6 @@ export const DashboardPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════════════
-          MODALS
-      ═══════════════════════════════════════════════════════════════════════ */}
-
-      {/* ── Weight Due Goats Modal ─────────────────────────────────────────── */}
       {showWeightDueModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
@@ -626,7 +598,6 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Record Weight Modal ────────────────────────────────────────────── */}
       {showWeightModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
@@ -655,6 +626,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setWeightForm({ ...weightForm, goatId: id }); setWeightGoatSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="weightGoatSearch"
+                    goatsList={goatsList}
                   />
                 </div>
 
@@ -691,7 +663,6 @@ export const DashboardPage: React.FC = () => {
                     onChange={(e) => setWeightForm({ ...weightForm, weight: e.target.value })}
                     required
                   />
-                  {/* Live weight gain display */}
                   {weightGainVal !== null && weightForm.weight && (
                     <div className={`flex items-center gap-1.5 mt-1.5 text-sm font-semibold ${weightGainVal >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
                       {weightGainVal >= 0
@@ -724,7 +695,6 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Vaccine Modal ──────────────────────────────────────────────────── */}
       {showVaccineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
@@ -753,6 +723,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setVaccineForm({ ...vaccineForm, goatId: id }); setVaccineSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="vaccineGoatSearch"
+                    goatsList={goatsList}
                   />
                 </div>
                 <div>
@@ -775,7 +746,6 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Deworming Modal ────────────────────────────────────────────────── */}
       {showDewormingModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <Card className="w-full max-w-md bg-card shadow-2xl">
@@ -804,6 +774,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setDewormingForm({ ...dewormingForm, goatId: id }); setDewormingSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="dewormingGoatSearch"
+                    goatsList={goatsList}
                   />
                 </div>
                 <div>
@@ -826,7 +797,6 @@ export const DashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* ── Sell Goat Modal ────────────────────────────────────────────────── */}
       {showSaleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
           <Card className="w-full max-w-md bg-card shadow-2xl my-8">
@@ -855,6 +825,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setSaleForm({ ...saleForm, goatId: id }); setSaleGoatSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="saleGoatSearch"
+                    goatsList={goatsList}
                   />
                 </div>
 
@@ -871,7 +842,6 @@ export const DashboardPage: React.FC = () => {
                   />
                 </div>
 
-                {/* Bidirectional price calculation */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label htmlFor="saleTotalPrice">Total Price (₹)</Label>

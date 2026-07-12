@@ -262,7 +262,7 @@ export const GoatsListPage: React.FC = () => {
         if (pg.dewormingStatus === 'dewormed') {
           await recordDeworming(goatId, { goatId, dewormingDate: pg.purchaseDate || new Date(), status: 'dewormed' });
         }
-        if (pg.buyerName && pg.saleWeight && pg.saleWeight > 0 && pg.saleRatePerKg && pg.saleRatePerKg > 0) {
+        if (pg.saleWeight && pg.saleWeight > 0 && pg.saleRatePerKg && pg.saleRatePerKg > 0) {
           const saleAmount = pg.saleWeight * pg.saleRatePerKg;
           const netProfit = saleAmount - pg.purchasePrice;
           const profitPercentage = pg.purchasePrice > 0 ? (netProfit / pg.purchasePrice) * 100 : 0;
@@ -271,8 +271,7 @@ export const GoatsListPage: React.FC = () => {
             saleDate: pg.saleDate || pg.purchaseDate || new Date(),
             saleWeight: pg.saleWeight,
             saleRatePerKg: pg.saleRatePerKg,
-            buyerName: pg.buyerName,
-            buyerContact: pg.buyerContact,
+            buyerName: 'N/A',
             saleAmount,
             netProfit,
             profitPercentage,

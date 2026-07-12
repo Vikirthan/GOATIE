@@ -64,8 +64,6 @@ export interface ExportDataBundle {
 export interface ImportedGoatData extends Omit<Goat, 'id' | 'createdAt' | 'updatedAt' | 'farmerId' | 'qrCode' | 'barcode'> {
   vaccinationStatus?: 'vaccinated' | 'unvaccinated';
   dewormingStatus?: 'dewormed' | 'not done';
-  buyerName?: string;
-  buyerContact?: string;
   saleWeight?: number;
   saleRatePerKg?: number;
   saleDate?: Date;
@@ -121,7 +119,6 @@ const GOAT_COLS = {
   vaccination:   'Vaccination Status',
   deworming:     'Deworming Status',
   status:        'Status',
-  buyerName:     'Buyer Name',
   saleWeight:    'Sale Weight (kg)',
   saleRatePerKg: 'Sale Rate (₹/kg)',
   saleAmount:    'Sale Amount (₹)',
@@ -183,9 +180,8 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
     { header: GOAT_COLS.sellerName,     key: 'sellerName',     width: 22 },
     { header: GOAT_COLS.vaccination,    key: 'vaccination',    width: 20 },
     { header: GOAT_COLS.deworming,      key: 'deworming',      width: 20 },
-    { header: GOAT_COLS.status,         key: 'status',         width: 12 },
-    { header: GOAT_COLS.buyerName,      key: 'buyerName',      width: 20 },
-    { header: GOAT_COLS.saleWeight,     key: 'saleWeight',     width: 18 },
+    { header: GOAT_COLS.status,         key: 'status',         width: 15 },
+    { header: GOAT_COLS.saleWeight,     key: 'saleWeight',     width: 15 },
     { header: GOAT_COLS.saleRatePerKg,  key: 'saleRatePerKg',  width: 18 },
     { header: GOAT_COLS.saleAmount,     key: 'saleAmount',     width: 18 },
     { header: GOAT_COLS.netProfit,      key: 'netProfit',      width: 18 },
@@ -209,7 +205,6 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
       vaccination:    vaccSet.has(goat.id) ? 'Vaccinated' : 'Unvaccinated',
       deworming:      dewormSet.has(goat.id) ? 'Dewormed' : 'Not done',
       status:         goat.status,
-      buyerName:      sale?.buyerName ?? '',
       saleWeight:     sale?.saleWeight ?? '',
       saleRatePerKg:  sale?.saleRatePerKg ?? '',
       saleAmount:     sale?.saleAmount ?? '',
@@ -361,7 +356,6 @@ export async function importFullExcelData(file: File): Promise<FullImportResult>
 
           const vaccVal = getCellVal(row, goatIdx, GOAT_COLS.vaccination)?.toString().trim().toLowerCase();
           const dewVal  = getCellVal(row, goatIdx, GOAT_COLS.deworming)?.toString().trim().toLowerCase();
-          const buyerName    = getCellVal(row, goatIdx, GOAT_COLS.buyerName)?.toString().trim();
           const saleWeightV  = getCellVal(row, goatIdx, GOAT_COLS.saleWeight);
           const saleRateV    = getCellVal(row, goatIdx, GOAT_COLS.saleRatePerKg);
 
@@ -377,7 +371,6 @@ export async function importFullExcelData(file: File): Promise<FullImportResult>
             status:          status as 'active' | 'sold' | 'deceased',
             vaccinationStatus: vaccVal === 'vaccinated' ? 'vaccinated' : 'unvaccinated',
             dewormingStatus:   dewVal === 'dewormed' ? 'dewormed' : 'not done',
-            buyerName:       buyerName || undefined,
             saleWeight:      saleWeightV ? parseNum(saleWeightV) : undefined,
             saleRatePerKg:   saleRateV ? parseNum(saleRateV) : undefined,
           });
