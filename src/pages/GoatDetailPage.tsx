@@ -111,7 +111,11 @@ export const GoatDetailPage: React.FC = () => {
   if (loading) return <LoadingSpinner message="Loading goat details..." />;
   if (!goat) return null;
 
-  const recordedWeights = weights.filter((w) => w.isRecorded && w.weight > 0).sort((a, b) => a.weightNumber - b.weightNumber);
+  const recordedWeights = weights.filter((w) => w.isRecorded && w.weight > 0).sort((a, b) => {
+    const timeA = new Date(a.recordedDate || a.createdAt).getTime();
+    const timeB = new Date(b.recordedDate || b.createdAt).getTime();
+    return timeA - timeB;
+  });
   const lastWeight = recordedWeights[recordedWeights.length - 1];
   const lastWeightDate = lastWeight?.recordedDate;
 

@@ -208,7 +208,11 @@ export const DashboardPage: React.FC = () => {
       freshActive.forEach((goat) => {
         const goatWeights = localWeights
           .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
-          .sort((a, b) => b.weightNumber - a.weightNumber);
+          .sort((a, b) => {
+            const timeA = new Date(a.recordedDate || a.createdAt).getTime();
+            const timeB = new Date(b.recordedDate || b.createdAt).getTime();
+            return timeB - timeA;
+          });
         
         const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
 
