@@ -1,0 +1,30 @@
+name: Keep Supabase Alive
+
+# Supabase pauses inactive projects after 7 days on the free tier.
+# This GitHub Action runs twice a week to make a small API request
+# to keep the project marked as "active".
+
+on:
+  schedule:
+    # Runs at 10:00 UTC on Mondays and Thursdays
+    - cron: '0 10 * * 1,4'
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  ping-supabase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase API
+        run: |
+          echo "Pinging Supabase to prevent pause..."
+          # A simple GET request to the REST API root
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X GET "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/" \
+               -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+               -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}")
+          
+          if [ "$response" -eq 200 ] || [ "$response" -eq 400 ]; then
+            echo "✅ Successfully pinged Supabase (HTTP $response)"
+          else
+            echo "⚠️ Unexpected response: $response (but still counts as activity!)"
+          fi
