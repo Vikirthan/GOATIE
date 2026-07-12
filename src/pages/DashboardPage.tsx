@@ -123,6 +123,8 @@ export const DashboardPage: React.FC = () => {
     weightDue: 0,
     pendingDeworming: 0,
     pendingVaccination: 0,
+    semmariWeight: 0,
+    velladuWeight: 0,
   });
 
   const [weightForm, setWeightForm] = useState({
@@ -193,11 +195,29 @@ export const DashboardPage: React.FC = () => {
       const allGoats = await getFarmerGoats(user.id);
       const freshActive = allGoats.filter((g) => g.status === 'active');
       const freshSold = allGoats.filter((g) => g.status === 'sold');
-      const [weightDue, deworm, vacc] = await Promise.all([
+      const [weightDue, deworm, vacc, localWeights] = await Promise.all([
         getGoatsDueForWeight(user.id),
         getPendingDeworming(user.id),
         getPendingVaccination(user.id),
+        indexedDB.getAllItems<WeightRecord>('weights'),
       ]);
+
+      let semmariWeight = 0;
+      let velladuWeight = 0;
+
+      freshActive.forEach((goat) => {
+        const goatWeights = localWeights
+          .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
+          .sort((a, b) => b.weightNumber - a.weightNumber);
+        
+        const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
+
+        if (goat.variant.toLowerCase() === 'semmari') {
+           semmariWeight += currentWeight;
+        } else if (goat.variant.toLowerCase() === 'velladu') {
+           velladuWeight += currentWeight;
+        }
+      });
 
       setStats({
         totalGoats: allGoats.length,
@@ -206,6 +226,8 @@ export const DashboardPage: React.FC = () => {
         weightDue: weightDue.length,
         pendingDeworming: deworm.length,
         pendingVaccination: vacc.length,
+        semmariWeight: parseFloat(semmariWeight.toFixed(2)),
+        velladuWeight: parseFloat(velladuWeight.toFixed(2)),
       });
       setGoatsList(freshActive);
       setWeightDueGoats(weightDue);
@@ -471,7 +493,7 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: undefined },
           { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:emerald-400', onClick: undefined },
@@ -479,6 +501,8 @@ export const DashboardPage: React.FC = () => {
           { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
           { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
           { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: undefined },
+          { title: 'Semmari Wt (kg)', value: stats.semmariWeight, gradient: 'from-cyan-500/20 via-cyan-500/10 to-transparent', border: 'border-cyan-500/20', text: 'text-cyan-600 dark:text-cyan-400', onClick: undefined },
+          { title: 'Velladu Wt (kg)', value: stats.velladuWeight, gradient: 'from-purple-500/20 via-purple-500/10 to-transparent', border: 'border-purple-500/20', text: 'text-purple-600 dark:text-purple-400', onClick: undefined },
         ].map((stat) => (
           <div
             key={stat.title}
