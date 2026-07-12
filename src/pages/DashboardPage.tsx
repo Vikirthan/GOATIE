@@ -113,6 +113,11 @@ export const DashboardPage: React.FC = () => {
   const [saleGoatSearch, setSaleGoatSearch] = useState('');
   const [showSaleGoatDropdown, setShowSaleGoatDropdown] = useState(false);
 
+  // Filtered dropdown states
+  const [pendingDewormingGoats, setPendingDewormingGoats] = useState<Goat[]>([]);
+  const [pendingVaccinationGoats, setPendingVaccinationGoats] = useState<Goat[]>([]);
+  const [allWeights, setAllWeights] = useState<WeightRecord[]>([]);
+
   // Weight gain display
   const [prevWeight, setPrevWeight] = useState<number | null>(null);
 
@@ -234,19 +239,32 @@ export const DashboardPage: React.FC = () => {
         velladuWeight: parseFloat(velladuWeight.toFixed(2)),
       });
       setGoatsList(freshActive);
+      setPendingDewormingGoats(deworm);
+      setPendingVaccinationGoats(vacc);
+      setAllWeights(localWeights);
       setWeightDueGoats(weightDue);
       setSalesChartData(computeTrend(allGoats));
 
       if (freshActive.length > 0) {
         const first = freshActive[0];
-        setVaccineSearch(first.earTagNumber);
-        setDewormingSearch(first.earTagNumber);
         setWeightGoatSearch(first.earTagNumber);
         setSaleGoatSearch(first.earTagNumber);
-        setVaccineForm((prev) => ({ ...prev, goatId: first.id }));
-        setDewormingForm((prev) => ({ ...prev, goatId: first.id }));
         setWeightForm((prev) => ({ ...prev, goatId: first.id }));
         setSaleForm((prev) => ({ ...prev, goatId: first.id }));
+      }
+      if (vacc.length > 0) {
+        setVaccineSearch(vacc[0].earTagNumber);
+        setVaccineForm((prev) => ({ ...prev, goatId: vacc[0].id }));
+      } else {
+        setVaccineSearch('');
+        setVaccineForm((prev) => ({ ...prev, goatId: '' }));
+      }
+      if (deworm.length > 0) {
+        setDewormingSearch(deworm[0].earTagNumber);
+        setDewormingForm((prev) => ({ ...prev, goatId: deworm[0].id }));
+      } else {
+        setDewormingSearch('');
+        setDewormingForm((prev) => ({ ...prev, goatId: '' }));
       }
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
@@ -652,7 +670,16 @@ export const DashboardPage: React.FC = () => {
                     showDropdown={showWeightGoatDropdown}
                     setShowDropdown={setShowWeightGoatDropdown}
                     formGoatId={weightForm.goatId}
-                    setFormGoatId={(id, tag) => { setWeightForm({ ...weightForm, goatId: id }); setWeightGoatSearch(tag); }}
+                    setFormGoatId={(id, tag) => { 
+                      const goatWeights = allWeights.filter(w => w.goatId === id && w.isRecorded);
+                      const recordedMonths = goatWeights.map(w => w.weightNumber);
+                      const available = [['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
+                        .filter(([v]) => !recordedMonths.includes(parseInt(v)));
+                      const nextMonth = available.length > 0 ? available[0][0] : '1';
+                      
+                      setWeightForm({ ...weightForm, goatId: id, weightNumber: nextMonth }); 
+                      setWeightGoatSearch(tag); 
+                    }}
                     placeholder="Type ear tag number..."
                     id="weightGoatSearch"
                     goatsList={goatsList}
@@ -667,7 +694,9 @@ export const DashboardPage: React.FC = () => {
                     value={weightForm.weightNumber}
                     onChange={(e) => setWeightForm({ ...weightForm, weightNumber: e.target.value })}
                   >
-                    {[['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']].map(([v, l]) => (
+                    {[['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
+                      .filter(([v]) => !allWeights.some(w => w.goatId === weightForm.goatId && w.isRecorded && w.weightNumber === parseInt(v)))
+                      .map(([v, l]) => (
                       <option key={v} value={v}>{l}</option>
                     ))}
                   </select>
@@ -752,7 +781,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setVaccineForm({ ...vaccineForm, goatId: id }); setVaccineSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="vaccineGoatSearch"
-                    goatsList={goatsList}
+                    goatsList={pendingVaccinationGoats}
                   />
                 </div>
                 <div>
@@ -803,7 +832,7 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setDewormingForm({ ...dewormingForm, goatId: id }); setDewormingSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="dewormingGoatSearch"
-                    goatsList={goatsList}
+                    goatsList={pendingDewormingGoats}
                   />
                 </div>
                 <div>
