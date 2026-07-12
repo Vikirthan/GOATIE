@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import * as indexedDB from '@/lib/indexeddb';
-import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, GoatVariant, OfflineAction } from '@/types';
+import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction } from '@/types';
 import { generateId } from '@/utils/helpers';
 
 // Helper: Convert camelCase properties to snake_case for PostgreSQL insertion/update
