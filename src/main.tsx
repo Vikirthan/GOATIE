@@ -7,25 +7,19 @@ import { initDB } from './lib/indexeddb'
 // Initialize IndexedDB
 initDB().catch(console.error)
 
+import { registerSW } from 'virtual:pwa-register'
+
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then((registration) => {
-      console.log('Service Worker registered:', registration);
-      
-      // Check for updates on register
-      registration.update();
-    }).catch((error) => {
-      console.error('Service Worker registration failed:', error);
-    });
-  });
-
-  // Handle automatic reload when service worker updates
-  let refreshing = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (refreshing) return;
-    refreshing = true;
-    window.location.reload();
+  registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      // Optional: show a prompt to reload when an update is available
+      console.log('New content available, please refresh.');
+    },
+    onOfflineReady() {
+      console.log('App is ready to work offline.');
+    },
   });
 }
 
