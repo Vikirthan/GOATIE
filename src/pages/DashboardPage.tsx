@@ -674,7 +674,7 @@ export const DashboardPage: React.FC = () => {
                       const goatWeights = allWeights.filter(w => w.goatId === id && w.isRecorded);
                       const recordedMonths = goatWeights.map(w => w.weightNumber);
                       const available = [['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
-                        .filter(([v]) => !recordedMonths.includes(parseInt(v)));
+                        .filter(([v]) => !recordedMonths.includes(parseInt(v) as any));
                       const nextMonth = available.length > 0 ? available[0][0] : '1';
                       
                       setWeightForm({ ...weightForm, goatId: id, weightNumber: nextMonth }); 
