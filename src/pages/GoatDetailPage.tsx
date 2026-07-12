@@ -45,11 +45,10 @@ const InfoCard: React.FC<{ icon: React.ReactNode; label: string; value: React.Re
   </div>
 );
 
-const RoundStatus: React.FC<{
-  round: number;
+const StatusRow: React.FC<{
   date?: Date | string;
   label: string;
-}> = ({ round, date, label }) => {
+}> = ({ date, label }) => {
   const done = !!date;
   return (
     <div className={`flex items-center justify-between p-3 rounded-lg border ${done
@@ -62,11 +61,11 @@ const RoundStatus: React.FC<{
           : <XCircle className="h-4 w-4 text-muted-foreground shrink-0" />
         }
         <span className={`text-sm font-medium ${done ? 'text-emerald-700 dark:text-emerald-300' : 'text-muted-foreground'}`}>
-          {label} {round}
+          {label}
         </span>
       </div>
       <span className={`text-sm font-semibold ${done ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
-        {done ? formatDate(date) : 'N/A'}
+        {done ? formatDate(date) : 'Not done'}
       </span>
     </div>
   );
@@ -290,20 +289,10 @@ export const GoatDetailPage: React.FC = () => {
           <h2 className="font-semibold text-foreground">Vaccination Status</h2>
         </div>
         <div className="space-y-2">
-          {[1, 2, 3].map((round) => {
-            const record = vaccinations[round - 1];
-            return (
-              <RoundStatus
-                key={round}
-                round={round}
-                date={record?.vaccinationDate}
-                label="Vaccination"
-              />
-            );
-          })}
-          {vaccinations.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-2">No vaccination records found</p>
-          )}
+          <StatusRow
+            date={vaccinations.length > 0 ? vaccinations[vaccinations.length - 1].vaccinationDate : undefined}
+            label="Vaccination"
+          />
         </div>
       </div>
 
@@ -314,20 +303,10 @@ export const GoatDetailPage: React.FC = () => {
           <h2 className="font-semibold text-foreground">Deworming Status</h2>
         </div>
         <div className="space-y-2">
-          {[1, 2, 3].map((round) => {
-            const record = deworming[round - 1];
-            return (
-              <RoundStatus
-                key={round}
-                round={round}
-                date={record?.dewormingDate}
-                label="Deworming"
-              />
-            );
-          })}
-          {deworming.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-2">No deworming records found</p>
-          )}
+          <StatusRow
+            date={deworming.length > 0 ? deworming[deworming.length - 1].dewormingDate : undefined}
+            label="Deworming"
+          />
         </div>
       </div>
 

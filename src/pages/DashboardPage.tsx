@@ -407,6 +407,7 @@ export const DashboardPage: React.FC = () => {
         saleAmount,
         netProfit,
         profitPercentage,
+        buyerName: 'N/A',
         remarks: saleForm.remarks || undefined,
       });
       showToast('success', 'Sale recorded successfully');
@@ -868,16 +869,7 @@ export const DashboardPage: React.FC = () => {
                 </div>
                 <p className="text-xs text-muted-foreground -mt-2">Enter either Total Price or Price/KG — the other will auto-calculate.</p>
 
-                <div>
-                  <Label htmlFor="buyerName">Buyer Name</Label>
-                  <Input
-                    id="buyerName"
-                    placeholder="Enter buyer name"
-                    value={saleForm.buyerName}
-                    onChange={(e) => setSaleForm({ ...saleForm, buyerName: e.target.value })}
-                    required
-                  />
-                </div>
+
 
                 <div>
                   <Label htmlFor="saleDate">Sale Date</Label>
