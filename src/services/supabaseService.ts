@@ -119,7 +119,10 @@ export async function createGoat(
     const { error: wErr } = await supabase.from('weights').insert(camelToSnake([w0, ...placeholders]));
     if (wErr) throw wErr;
   } catch (err: any) {
-    if (!navigator.onLine || err.message === 'Offline' || err.message?.includes('fetch') || err.message?.includes('Failed to fetch')) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+    
+    if (isNetworkError) {
       console.log('Offline: queuing goat creation locally');
       await indexedDB.addItem('goats', goat);
       await indexedDB.addItem('weights', w0);
@@ -193,8 +196,11 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
     const activeGoat = data.find(g => g.status === 'active') || data[0];
     return mapGoatData(activeGoat);
   } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError = !navigator.onLine || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+    
     // If it fails due to network issues, allow the flow to proceed to offline queueing
-    if (err.message === 'Failed to fetch' || err.message?.includes('fetch')) {
+    if (isNetworkError) {
       return null;
     }
     throw err;
