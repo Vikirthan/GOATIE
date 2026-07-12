@@ -172,15 +172,20 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
   return mapGoatData(data);
 }
 
-export async function getGoatByEarTag(_farmerId: string, earTagNumber: string): Promise<Goat | null> {
+export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
+  // Query all goats with this ear tag to avoid the "multiple rows" error from maybeSingle()
   const { data, error } = await supabase
     .from('goats')
     .select('*, sales(*)')
     .eq('ear_tag_number', earTagNumber)
-    .maybeSingle();
+    .eq('farmer_id', farmerId);
+    
   if (error) throw error;
-  if (!data) return null;
-  return mapGoatData(data);
+  if (!data || data.length === 0) return null;
+  
+  // Find the active one, or just return the first one if none are active
+  const activeGoat = data.find(g => g.status === 'active') || data[0];
+  return mapGoatData(activeGoat);
 }
 
 export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
