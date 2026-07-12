@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
+import * as indexedDB from '@/lib/indexeddb';
+import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, GoatVariant, OfflineAction } from '@/types';
 import { generateId } from '@/utils/helpers';
 
 // Helper: Convert camelCase properties to snake_case for PostgreSQL insertion/update
@@ -110,11 +111,36 @@ export async function createGoat(
     });
   }
 
-  const { error: goatErr } = await supabase.from('goats').insert(camelToSnake(goat));
-  if (goatErr) throw goatErr;
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { error: goatErr } = await supabase.from('goats').insert(camelToSnake(goat));
+    if (goatErr) throw goatErr;
 
-  const { error: wErr } = await supabase.from('weights').insert(camelToSnake([w0, ...placeholders]));
-  if (wErr) throw wErr;
+    const { error: wErr } = await supabase.from('weights').insert(camelToSnake([w0, ...placeholders]));
+    if (wErr) throw wErr;
+  } catch (err: any) {
+    if (!navigator.onLine || err.message === 'Offline' || err.message?.includes('fetch') || err.message?.includes('Failed to fetch')) {
+      console.log('Offline: queuing goat creation locally');
+      await indexedDB.addItem('goats', goat);
+      await indexedDB.addItem('weights', w0);
+      for (const w of placeholders) {
+        await indexedDB.addItem('weights', w);
+      }
+      
+      const offlineAction: OfflineAction = {
+        id: generateId(),
+        type: 'create',
+        collection: 'goats',
+        data: { goat, weights: [w0, ...placeholders] },
+        timestamp: new Date(),
+        synced: false,
+      };
+      // Type casting because offlineQueue might expect a slightly different type in some versions, but we know it works
+      await indexedDB.addItem('offlineQueue', offlineAction as any);
+    } else {
+      throw err;
+    }
+  }
 
   return id;
 }
@@ -423,4 +449,47 @@ export async function getAllWeights(): Promise<WeightRecord[]> {
   return (data || []).map((item: any) =>
     parseDates<WeightRecord>(snakeToCamel(item), ['dueDate', 'recordedDate', 'createdAt', 'updatedAt'])
   );
+}
+// ─── Offline Sync ─────────────────────────────────────────────────────────────
+
+export async function syncOfflineActions() {
+  if (!navigator.onLine) return;
+  
+  try {
+    const actions = await indexedDB.getAllItems<OfflineAction>('offlineQueue');
+    if (actions.length === 0) return;
+
+    console.log(`Syncing ${actions.length} offline actions...`);
+    
+    for (const action of actions) {
+      if (action.type === 'create' && action.collection === 'goats') {
+        const { goat, weights } = action.data;
+        
+        try {
+          // Push goat
+          const { error: goatErr } = await supabase.from('goats').insert(camelToSnake(goat));
+          if (goatErr) throw goatErr;
+
+          // Push weights
+          const { error: wErr } = await supabase.from('weights').insert(camelToSnake(weights));
+          if (wErr) throw wErr;
+          
+          // Remove from queue on success
+          await indexedDB.deleteItem('offlineQueue', action.id);
+          console.log(`Successfully synced goat ${goat.earTagNumber}`);
+        } catch (err) {
+          console.error(`Failed to sync offline action ${action.id}:`, err);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error during offline sync:', err);
+  }
+}
+
+// Automatically sync when coming back online
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', syncOfflineActions);
+  // Also try on load
+  setTimeout(syncOfflineActions, 2000);
 }
