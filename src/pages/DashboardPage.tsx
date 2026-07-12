@@ -430,7 +430,7 @@ export const DashboardPage: React.FC = () => {
       {showDropdown && (
         <div className="absolute z-20 w-full bg-card border border-input rounded-lg mt-1 max-h-44 overflow-y-auto shadow-xl">
           {goatsList
-            .filter((g) => g.earTagNumber.toLowerCase().includes(searchVal.toLowerCase()))
+            .filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase()))
             .map((g) => (
               <div
                 key={g.id}
@@ -442,7 +442,7 @@ export const DashboardPage: React.FC = () => {
                 <span className="text-muted-foreground text-xs ml-auto">{g.variant}</span>
               </div>
             ))}
-          {goatsList.filter((g) => g.earTagNumber.toLowerCase().includes(searchVal.toLowerCase())).length === 0 && (
+          {goatsList.filter((g) => g.earTagNumber?.toLowerCase().includes((searchVal || '').toLowerCase())).length === 0 && (
             <div className="px-3 py-2.5 text-sm text-muted-foreground">No matching goats found</div>
           )}
         </div>

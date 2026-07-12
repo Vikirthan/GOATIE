@@ -176,9 +176,18 @@ export async function getGoat(goatId: string): Promise<Goat | null> {
 }
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
-  // If offline, bypass the unique ear tag check so it can be queued
+  const checkLocal = async () => {
+    try {
+      const localGoats = await indexedDB.getAllItems<Goat>('goats');
+      const activeGoat = localGoats.find(g => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active');
+      return activeGoat || null;
+    } catch {
+      return null;
+    }
+  };
+
   if (!navigator.onLine) {
-    return null;
+    return checkLocal();
   }
 
   try {
@@ -190,7 +199,10 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
       .eq('farmer_id', farmerId);
       
     if (error) throw error;
-    if (!data || data.length === 0) return null;
+    if (!data || data.length === 0) {
+      // It might be in the local queue only but not synced yet
+      return checkLocal();
+    }
     
     // Find the active one, or just return the first one if none are active
     const activeGoat = data.find(g => g.status === 'active') || data[0];
@@ -199,9 +211,9 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
     const errMsg = err?.message || err?.error || err?.toString() || '';
     const isNetworkError = !navigator.onLine || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
     
-    // If it fails due to network issues, allow the flow to proceed to offline queueing
+    // If it fails due to network issues, fallback to offline DB
     if (isNetworkError) {
-      return null;
+      return checkLocal();
     }
     throw err;
   }
