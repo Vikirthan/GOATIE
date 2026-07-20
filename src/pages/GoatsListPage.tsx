@@ -72,6 +72,7 @@ export const GoatsListPage: React.FC = () => {
   const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
   const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
 
+  const [syncing, setSyncing] = useState(false);
   const [editingGoat, setEditingGoat] = useState<Goat | null>(null);
   const [editForm, setEditForm] = useState({ purchaseWeight: '', purchasePrice: '', purchaseDate: '' });
 
@@ -172,6 +173,20 @@ export const GoatsListPage: React.FC = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleSyncData = async () => {
+    if (!user) return;
+    try {
+      setSyncing(true);
+      await forceSync(user.id);
+      showToast('success', 'Offline data synced successfully');
+      await loadGoatsList(true);
+    } catch (error) {
+      showToast('error', 'Failed to sync data');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -415,12 +430,12 @@ export const GoatsListPage: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => loadGoatsList(true)}
-            disabled={refreshing}
+            onClick={handleSyncData}
+            disabled={syncing || refreshing}
             className="flex items-center gap-2"
           >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
+            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+            Sync Offline
           </Button>
           <Button
             variant="outline"
