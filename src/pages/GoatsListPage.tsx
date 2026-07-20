@@ -14,14 +14,16 @@ import {
   recordWeight,
   recordSale,
   deleteGoat,
+  updateGoat,
   isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { supabase } from '@/lib/supabase';
 import { getAllWeights } from '@/services/supabaseService';
 import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
-import { Plus, Search, Download, Upload, Trash2, X, RefreshCw, Weight } from 'lucide-react';
+import { Plus, Search, Download, Upload, Trash2, Edit2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
 import { exportGoatsToExcel, importFullExcelData } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { showToast } from '@/components/common/Toast';
@@ -70,6 +72,9 @@ export const GoatsListPage: React.FC = () => {
   const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
   const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
 
+  const [editingGoat, setEditingGoat] = useState<Goat | null>(null);
+  const [editForm, setEditForm] = useState({ purchaseWeight: '', purchasePrice: '', purchaseDate: '' });
+
   // Map goatId → latest recorded weight value
   const latestWeightMap = React.useMemo(() => {
     const map = new Map<string, number>();
@@ -99,6 +104,33 @@ export const GoatsListPage: React.FC = () => {
       loadGoatsList();
     } catch (err: any) {
       showToast('error', 'Failed to delete goat', err.message);
+    }
+  };
+
+  const handleEditClick = (e: React.MouseEvent, goat: Goat) => {
+    e.stopPropagation();
+    setEditingGoat(goat);
+    setEditForm({
+      purchaseWeight: goat.purchaseWeight.toString(),
+      purchasePrice: goat.purchasePrice.toString(),
+      purchaseDate: new Date(goat.purchaseDate).toISOString().split('T')[0],
+    });
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGoat) return;
+    try {
+      await updateGoat(editingGoat.id, {
+        purchaseWeight: parseFloat(editForm.purchaseWeight),
+        purchasePrice: parseFloat(editForm.purchasePrice),
+        purchaseDate: new Date(editForm.purchaseDate),
+      });
+      showToast('success', 'Goat updated successfully');
+      setEditingGoat(null);
+      loadGoatsList();
+    } catch (err: any) {
+      showToast('error', 'Failed to update goat', err.message);
     }
   };
 
@@ -146,6 +178,9 @@ export const GoatsListPage: React.FC = () => {
   useEffect(() => {
     loadGoatsList();
 
+    const handleSync = () => loadGoatsList();
+    window.addEventListener('data-synced', handleSync);
+
     if (isSupabaseEnabled()) {
       const channel = supabase
         .channel('public:goats-list')
@@ -165,8 +200,13 @@ export const GoatsListPage: React.FC = () => {
 
       return () => {
         supabase.removeChannel(channel);
+        window.removeEventListener('data-synced', handleSync);
       };
     }
+
+    return () => {
+      window.removeEventListener('data-synced', handleSync);
+    };
   }, [user]);
 
   useEffect(() => {
@@ -585,7 +625,14 @@ export const GoatsListPage: React.FC = () => {
                             {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
                           </span>
                         </td>
-                        <td className="px-4 py-3.5 text-center">
+                        <td className="px-4 py-3.5 text-center whitespace-nowrap">
+                          <button
+                            onClick={(e) => handleEditClick(e, goat)}
+                            className="inline-flex items-center justify-center h-8 w-8 mr-2 rounded-lg text-blue-500 hover:text-white hover:bg-blue-500 dark:hover:bg-blue-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            title="Edit goat"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={(e) => handleDeleteGoat(e, goat.id)}
                             className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 hover:text-white hover:bg-red-500 dark:hover:bg-red-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-red-400"
@@ -635,13 +682,22 @@ export const GoatsListPage: React.FC = () => {
                           {goat.status}
                         </span>
                       </div>
-                      <button
-                        onClick={(e) => handleDeleteGoat(e, goat.id)}
-                        className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white dark:bg-red-950/30 dark:hover:bg-red-600 transition-all duration-150"
-                        title="Delete goat"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={(e) => handleEditClick(e, goat)}
+                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-500 hover:text-white dark:bg-blue-950/30 dark:hover:bg-blue-600 transition-all duration-150"
+                          title="Edit goat"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteGoat(e, goat.id)}
+                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white dark:bg-red-950/30 dark:hover:bg-red-600 transition-all duration-150"
+                          title="Delete goat"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-sm text-muted-foreground mb-3">
                       {goat.variant} <span className="mx-1 opacity-40">•</span> <span className="capitalize">{goat.gender}</span>
@@ -684,6 +740,61 @@ export const GoatsListPage: React.FC = () => {
             </p>
           </div>
         </>
+      )}
+      {/* Edit Modal */}
+      {editingGoat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-card w-full max-w-md rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h3 className="text-lg font-bold">Edit Goat #{editingGoat.earTagNumber}</h3>
+              <button onClick={() => setEditingGoat(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditSubmit} className="p-4 space-y-4">
+              <div>
+                <Label htmlFor="editWeight">Purchase Weight (kg)</Label>
+                <Input
+                  id="editWeight"
+                  type="number"
+                  step="0.1"
+                  value={editForm.purchaseWeight}
+                  onChange={(e) => setEditForm({ ...editForm, purchaseWeight: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="editPrice">Purchase Price (₹)</Label>
+                <Input
+                  id="editPrice"
+                  type="number"
+                  step="0.01"
+                  value={editForm.purchasePrice}
+                  onChange={(e) => setEditForm({ ...editForm, purchasePrice: e.target.value })}
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="editDate">Purchase Date</Label>
+                <Input
+                  id="editDate"
+                  type="date"
+                  value={editForm.purchaseDate}
+                  onChange={(e) => setEditForm({ ...editForm, purchaseDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <Button type="button" variant="outline" onClick={() => setEditingGoat(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary">
+                  Save Changes
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
