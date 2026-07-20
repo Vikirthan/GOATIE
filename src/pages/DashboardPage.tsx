@@ -26,7 +26,7 @@ import { getAllWeights } from '@/services/supabaseService';
 import { Goat, WeightRecord } from '@/types';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
-  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag
+  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag, RefreshCw
 } from 'lucide-react';
 
 const GoatSearchDropdown = ({
@@ -283,6 +283,26 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
+  const handleHardReload = () => {
+    // Unregister service workers
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+          registration.unregister();
+        } 
+      });
+    }
+    // Clear caches
+    if ('caches' in window) {
+      caches.keys().then((names) => {
+        for (let name of names)
+          caches.delete(name);
+      });
+    }
+    // Reload page
+    window.location.reload();
+  };
+
   useEffect(() => {
     loadData();
 
@@ -504,9 +524,15 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-6 relative">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Welcome back, <span className="font-medium text-foreground">{user?.displayName}</span></p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">Welcome back, <span className="font-medium text-foreground">{user?.displayName}</span></p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleHardReload} className="gap-2">
+          <RefreshCw className="h-4 w-4" />
+          Hard Refresh
+        </Button>
       </div>
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
