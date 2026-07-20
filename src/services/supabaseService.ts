@@ -256,7 +256,15 @@ export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sol
   }
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map(mapGoatData);
+  
+  const goats = (data || []).map(mapGoatData);
+  
+  // Sync down to local DB so offline mode has the latest data
+  if (navigator.onLine) {
+    Promise.all(goats.map(g => indexedDB.updateItem('goats', g))).catch(e => console.error('Failed to sync goats to local DB:', e));
+  }
+  
+  return goats;
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
@@ -516,9 +524,15 @@ export async function getAllWeights(): Promise<WeightRecord[]> {
     .select('*')
     .order('weight_number', { ascending: true });
   if (error) throw error;
-  return (data || []).map((item: any) =>
+  const weights = (data || []).map((item: any) =>
     parseDates<WeightRecord>(snakeToCamel(item), ['dueDate', 'recordedDate', 'createdAt', 'updatedAt'])
   );
+
+  if (navigator.onLine) {
+    Promise.all(weights.map(w => indexedDB.updateItem('weights', w))).catch(e => console.error('Failed to sync weights to local DB:', e));
+  }
+
+  return weights;
 }
 // ─── Offline Sync ─────────────────────────────────────────────────────────────
 
