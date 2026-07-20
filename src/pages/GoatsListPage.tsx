@@ -15,6 +15,7 @@ import {
   recordSale,
   deleteGoat,
   updateGoat,
+  forceSync,
   isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
