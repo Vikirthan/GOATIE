@@ -283,24 +283,36 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  const handleHardReload = () => {
-    // Unregister service workers
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for(let registration of registrations) {
-          registration.unregister();
+  const handleHardReload = async () => {
+    try {
+      setLoading(true);
+      // Unregister service workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let registration of registrations) {
+          await registration.unregister();
         } 
-      });
+      }
+      // Clear caches
+      if ('caches' in window) {
+        const names = await caches.keys();
+        for (let name of names) {
+          await caches.delete(name);
+        }
+      }
+      // Clear local IndexedDB data to remove stuck/stale items
+      await indexedDB.clearStore('goats');
+      await indexedDB.clearStore('weights');
+      await indexedDB.clearStore('deworming');
+      await indexedDB.clearStore('vaccination');
+      await indexedDB.clearStore('sales');
+      
+      // Reload page
+      window.location.reload();
+    } catch (err) {
+      console.error('Hard reload failed:', err);
+      window.location.reload();
     }
-    // Clear caches
-    if ('caches' in window) {
-      caches.keys().then((names) => {
-        for (let name of names)
-          caches.delete(name);
-      });
-    }
-    // Reload page
-    window.location.reload();
   };
 
   useEffect(() => {
