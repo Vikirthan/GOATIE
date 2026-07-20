@@ -157,11 +157,39 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
   // Omit nested objects like saleInfo to prevent SQL insertion errors
   const { saleInfo, ...dbData } = updatedData as any;
 
-  const { error } = await supabase
-    .from('goats')
-    .update(camelToSnake(dbData))
-    .eq('id', goatId);
-  if (error) throw error;
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { error } = await supabase
+      .from('goats')
+      .update(camelToSnake(dbData))
+      .eq('id', goatId);
+    if (error) throw error;
+  } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+    
+    if (isNetworkError) {
+      console.log('Offline: queuing goat update locally');
+      
+      const existing = await indexedDB.getItem<Goat>('goats', goatId);
+      if (existing) {
+        const localUpdated = { ...existing, ...updatedData };
+        await indexedDB.updateItem('goats', localUpdated);
+      }
+
+      const offlineAction: OfflineAction = {
+        id: generateId(),
+        type: 'update',
+        collection: 'goats',
+        data: { id: goatId, updates: dbData },
+        timestamp: new Date(),
+        synced: false,
+      };
+      await indexedDB.addItem('offlineQueue', offlineAction as any);
+    } else {
+      throw err;
+    }
+  }
 }
 
 export async function getGoat(goatId: string): Promise<Goat | null> {
@@ -232,6 +260,12 @@ export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sol
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
+  // Delete related records to prevent foreign key constraint violations
+  await supabase.from('weights').delete().eq('goat_id', goatId);
+  await supabase.from('vaccinations').delete().eq('goat_id', goatId);
+  await supabase.from('deworming').delete().eq('goat_id', goatId);
+  await supabase.from('sales').delete().eq('goat_id', goatId);
+
   const { error } = await supabase
     .from('goats')
     .delete()
@@ -514,7 +548,18 @@ export async function syncOfflineActions() {
           await indexedDB.deleteItem('offlineQueue', action.id);
           console.log(`Successfully synced goat ${goat.earTagNumber}`);
         } catch (err) {
-          console.error(`Failed to sync offline action ${action.id}:`, err);
+          console.error(`Failed to sync offline create action ${action.id}:`, err);
+        }
+      } else if (action.type === 'update' && action.collection === 'goats') {
+        const { id, updates } = action.data;
+        try {
+          const { error: updateErr } = await supabase.from('goats').update(camelToSnake(updates)).eq('id', id);
+          if (updateErr) throw updateErr;
+          
+          await indexedDB.deleteItem('offlineQueue', action.id);
+          console.log(`Successfully synced updated goat ${id}`);
+        } catch (err) {
+          console.error(`Failed to sync offline update action ${action.id}:`, err);
         }
       }
     }
