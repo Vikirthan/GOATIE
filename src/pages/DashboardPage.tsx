@@ -22,6 +22,7 @@ import {
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { supabase } from '@/lib/supabase';
+import { getAllWeights } from '@/services/supabaseService';
 import { Goat, WeightRecord } from '@/types';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
@@ -212,7 +213,7 @@ export const DashboardPage: React.FC = () => {
         getGoatsDueForWeight(user.id),
         getPendingDeworming(user.id),
         getPendingVaccination(user.id),
-        indexedDB.getAllItems<WeightRecord>('weights'),
+        isSupabaseEnabled() ? getAllWeights() : indexedDB.getAllItems<WeightRecord>('weights'),
       ]);
 
       let semmariWeight = 0;
@@ -228,10 +229,11 @@ export const DashboardPage: React.FC = () => {
           });
         
         const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
+        const variant = (goat.variant || '').trim().toLowerCase();
 
-        if (goat.variant.toLowerCase() === 'semmari') {
+        if (variant.includes('semmari')) {
            semmariWeight += Number(currentWeight) || 0;
-        } else if (goat.variant.toLowerCase() === 'velladu') {
+        } else if (variant.includes('velladu')) {
            velladuWeight += Number(currentWeight) || 0;
         }
       });
@@ -284,6 +286,9 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     loadData();
 
+    const handleSync = () => loadData();
+    window.addEventListener('data-synced', handleSync);
+
     if (isSupabaseEnabled()) {
       const channel = supabase
         .channel('public:dashboard')
@@ -306,8 +311,13 @@ export const DashboardPage: React.FC = () => {
 
       return () => {
         supabase.removeChannel(channel);
+        window.removeEventListener('data-synced', handleSync);
       };
     }
+
+    return () => {
+      window.removeEventListener('data-synced', handleSync);
+    };
   }, [user]);
 
   useEffect(() => {

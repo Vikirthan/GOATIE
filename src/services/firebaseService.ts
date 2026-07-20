@@ -801,6 +801,14 @@ export async function getPendingVaccination(farmerId: string): Promise<Goat[]> {
   return pending;
 }
 
+export async function forceSync(farmerId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    await supabaseService.syncOfflineActions();
+  }
+  // This will trigger a fetch and sync down for Google Sheets or cache update
+  await getFarmerGoats(farmerId);
+}
+
 export async function getAllDeworming(): Promise<DewormingRecord[]> {
   if (isSupabaseEnabled()) {
     return supabaseService.getAllDeworming();
