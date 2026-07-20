@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import * as indexedDB from '@/lib/indexeddb';
-import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction } from '@/types';
+import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction, SyncHistoryItem } from '@/types';
 import { generateId } from '@/utils/helpers';
 
 // Helper: Convert camelCase properties to snake_case for PostgreSQL insertion/update
@@ -546,6 +546,16 @@ export async function syncOfflineActions() {
           
           // Remove from queue on success
           await indexedDB.deleteItem('offlineQueue', action.id);
+          
+          // Log to history
+          const historyItem: SyncHistoryItem = {
+            id: generateId(),
+            actionId: action.id,
+            description: `Goat ${goat.earTagNumber} - creation synced`,
+            syncedAt: new Date(),
+          };
+          await indexedDB.addItem('syncHistory', historyItem as any);
+          
           console.log(`Successfully synced goat ${goat.earTagNumber}`);
         } catch (err) {
           console.error(`Failed to sync offline create action ${action.id}:`, err);
@@ -557,6 +567,22 @@ export async function syncOfflineActions() {
           if (updateErr) throw updateErr;
           
           await indexedDB.deleteItem('offlineQueue', action.id);
+          
+          // Fetch goat to get ear tag for nice description, or fallback
+          let goatDesc = id;
+          try {
+            const localGoat = await indexedDB.getItem<Goat>('goats', id);
+            if (localGoat) goatDesc = localGoat.earTagNumber;
+          } catch (e) {}
+
+          const historyItem: SyncHistoryItem = {
+            id: generateId(),
+            actionId: action.id,
+            description: `Goat ${goatDesc} - edits synced`,
+            syncedAt: new Date(),
+          };
+          await indexedDB.addItem('syncHistory', historyItem as any);
+
           console.log(`Successfully synced updated goat ${id}`);
         } catch (err) {
           console.error(`Failed to sync offline update action ${action.id}:`, err);

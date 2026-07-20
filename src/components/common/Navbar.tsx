@@ -6,28 +6,14 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { logout } from '@/services/authService';
 import { showToast } from '@/components/common/Toast';
-import { forceSync } from '@/services/firebaseService';
+import { SyncQueueModal } from '@/components/common/SyncQueueModal';
 
 export const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-
-  const handleSync = async () => {
-    if (!user) return;
-    try {
-      setSyncing(true);
-      await forceSync(user.id);
-      showToast('success', 'Offline data synced successfully');
-      window.dispatchEvent(new Event('data-synced'));
-    } catch (error) {
-      showToast('error', 'Failed to sync data');
-    } finally {
-      setSyncing(false);
-    }
-  };
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -67,12 +53,11 @@ export const Navbar: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleSync}
-                  disabled={syncing}
+                  onClick={() => setSyncModalOpen(true)}
                   className="gap-2"
                 >
-                  <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  Sync Offline
+                  <RefreshCw className="h-4 w-4" />
+                  Sync Status
                 </Button>
                 <span className="text-sm text-muted-foreground">{user.displayName}</span>
                 <Button
@@ -114,12 +99,11 @@ export const Navbar: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleSync}
-                  disabled={syncing}
+                  onClick={() => { setSyncModalOpen(true); setMenuOpen(false); }}
                   className="justify-start gap-2"
                 >
-                  <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                  Sync Offline
+                  <RefreshCw className="h-4 w-4" />
+                  Sync Status
                 </Button>
                 <Button
                   variant="outline"
@@ -134,6 +118,11 @@ export const Navbar: React.FC = () => {
           </div>
         )}
       </div>
+
+      <SyncQueueModal 
+        isOpen={syncModalOpen} 
+        onClose={() => setSyncModalOpen(false)} 
+      />
     </nav>
   );
 };

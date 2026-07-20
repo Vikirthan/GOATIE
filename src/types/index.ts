@@ -184,3 +184,10 @@ export interface OfflineAction {
   timestamp: Date;
   synced: boolean;
 }
+
+export interface SyncHistoryItem {
+  id: string;
+  actionId: string; // The ID of the offline action that was synced
+  description: string; // e.g. "Goat 88 - created", "Goat 88 - edited"
+  syncedAt: Date;
+}

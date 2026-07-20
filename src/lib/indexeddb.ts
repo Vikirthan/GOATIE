@@ -1,7 +1,7 @@
 // IndexedDB utilities for offline storage
 
 const DB_NAME = 'GOATIE_DB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export type ObjectStore = 
   | 'goats'
@@ -11,6 +11,7 @@ export type ObjectStore =
   | 'sales'
   | 'notifications'
   | 'offlineQueue'
+  | 'syncHistory'
   | 'variants'
   | 'languages';
 
@@ -37,6 +38,7 @@ export async function initDB(): Promise<IDBDatabase> {
         { name: 'sales', keyPath: 'id' },
         { name: 'notifications', keyPath: 'id' },
         { name: 'offlineQueue', keyPath: 'id' },
+        { name: 'syncHistory', keyPath: 'id' },
         { name: 'variants', keyPath: 'id' },
         { name: 'languages', keyPath: 'id' },
       ];
