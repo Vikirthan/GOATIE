@@ -62,8 +62,14 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+    <div 
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
           <div>
             <h2 className="text-xl font-bold text-slate-900">Sync Status</h2>
@@ -140,6 +146,12 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
               </ul>
             )}
           </section>
+        </div>
+
+        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
         </div>
       </div>
     </div>
