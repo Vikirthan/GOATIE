@@ -23,7 +23,7 @@ export const GoatRegistrationPage: React.FC = () => {
     earTagNumber: '',
     purchaseDate: '',
     purchaseWeight: '',
-    variant: '',
+    variant: 'SEMMARI',
     gender: 'male',
     purchasePrice: '',       // Total price
     purchasePricePerKg: '',  // Price per kg
