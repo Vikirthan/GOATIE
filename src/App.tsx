@@ -15,6 +15,17 @@ import { GoatDetailPage } from '@/pages/GoatDetailPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 
 export const App: React.FC = () => {
+  React.useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement;
+      if (document.activeElement === target && target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'number') {
+        (target as HTMLInputElement).blur();
+      }
+    };
+    window.addEventListener('wheel', handleWheel, { passive: true });
+    return () => window.removeEventListener('wheel', handleWheel);
+  }, []);
+
   return (
     <Router>
       <ThemeProvider>

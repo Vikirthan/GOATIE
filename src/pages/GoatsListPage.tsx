@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner, EmptyState } from '@/components/common/Loaders';
 import { useAuth } from '@/context/AuthContext';
@@ -84,6 +84,7 @@ function parseWeightGainFilter(expr: string): { min: number; max: number } | nul
 
 export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [goats, setGoats] = useState<Goat[]>([]);
   const [filteredGoats, setFilteredGoats] = useState<Goat[]>([]);
@@ -95,6 +96,18 @@ export const GoatsListPage: React.FC = () => {
   const [variantFilter, setVariantFilter] = useState<string>(() => sessionStorage.getItem('goats_variantFilter') || 'all');
   const [weightFilter, setWeightFilter] = useState(() => sessionStorage.getItem('goats_weightFilter') || '');
   const [weightGainFilter, setWeightGainFilter] = useState(() => sessionStorage.getItem('goats_weightGainFilter') || '');
+
+  useEffect(() => {
+    if (location.state?.usr?.status) {
+      setFilter(location.state.usr.status);
+      setSearchTerm('');
+      setVariantFilter('all');
+      setWeightFilter('');
+      setWeightGainFilter('');
+      // Clear location state to prevent locking the filter on refresh
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, navigate]);
 
   useEffect(() => {
     sessionStorage.setItem('goats_searchTerm', searchTerm);
@@ -235,14 +248,6 @@ export const GoatsListPage: React.FC = () => {
       setSyncing(false);
     }
   };
-
-  useEffect(() => {
-    // Check for incoming state for filter (e.g. from Dashboard)
-    const state = window.history.state?.usr;
-    if (state && state.status && ['all', 'active', 'sold', 'deceased'].includes(state.status)) {
-      setFilter(state.status);
-    }
-  }, []);
 
   useEffect(() => {
     loadGoatsList();

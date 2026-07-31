@@ -118,6 +118,16 @@ export async function createGoat(
 
     const { error: wErr } = await supabase.from('weights').insert(camelToSnake([w0, ...placeholders]));
     if (wErr) throw wErr;
+
+    try {
+      await indexedDB.addItem('goats', goat);
+      await indexedDB.addItem('weights', w0);
+      for (const w of placeholders) {
+        await indexedDB.addItem('weights', w);
+      }
+    } catch (e) {
+      console.error('Failed to sync locally', e);
+    }
   } catch (err: any) {
     const errMsg = err?.message || err?.error || err?.toString() || '';
     const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
@@ -164,6 +174,15 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
       .update(camelToSnake(dbData))
       .eq('id', goatId);
     if (error) throw error;
+
+    try {
+      const existing = await indexedDB.getItem<Goat>('goats', goatId);
+      if (existing) {
+        await indexedDB.updateItem('goats', { ...existing, ...updatedData });
+      }
+    } catch (e) {
+      console.error('Failed to sync locally', e);
+    }
   } catch (err: any) {
     const errMsg = err?.message || err?.error || err?.toString() || '';
     const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
@@ -280,6 +299,13 @@ export async function deleteGoat(goatId: string): Promise<void> {
     .delete()
     .eq('id', goatId);
   if (error) throw error;
+
+  // Immediately remove from local DB to prevent UI lag
+  try {
+    await indexedDB.deleteItem('goats', goatId);
+  } catch (e) {
+    console.error('Failed to delete goat locally', e);
+  }
 }
 
 // ─── Weight Services ─────────────────────────────────────────────────────────
@@ -332,6 +358,9 @@ export async function recordWeight(
       .update(camelToSnake(updated))
       .eq('id', existing.id);
     if (updateErr) throw updateErr;
+    
+    try { await indexedDB.updateItem('weights', updated); } catch (e) {}
+    
     return existing.id;
   } else {
     const id = generateId();
@@ -348,6 +377,9 @@ export async function recordWeight(
       .from('weights')
       .insert(camelToSnake(record));
     if (insertErr) throw insertErr;
+    
+    try { await indexedDB.addItem('weights', record); } catch (e) {}
+    
     return id;
   }
 }
@@ -395,6 +427,9 @@ export async function recordDeworming(
     .from('deworming')
     .insert(camelToSnake(record));
   if (error) throw error;
+  
+  try { await indexedDB.addItem('deworming', record); } catch (e) {}
+  
   return id;
 }
 
@@ -434,6 +469,9 @@ export async function recordVaccination(
     .from('vaccinations')
     .insert(camelToSnake(record));
   if (error) throw error;
+  
+  try { await indexedDB.addItem('vaccination', record); } catch (e) {}
+  
   return id;
 }
 
@@ -480,6 +518,13 @@ export async function recordSale(
     .update({ status: 'sold', updated_at: now })
     .eq('id', goatId);
   if (goatErr) throw goatErr;
+
+  try { 
+    const existing = await indexedDB.getItem<Goat>('goats', goatId);
+    if (existing) {
+      await indexedDB.updateItem('goats', { ...existing, status: 'sold', updatedAt: now, saleInfo: sale });
+    }
+  } catch (e) {}
 
   return id;
 }
