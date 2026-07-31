@@ -31,7 +31,8 @@ import {
 
 const GoatSearchDropdown = ({
   refEl, searchVal, setSearch, showDropdown, setShowDropdown,
-  formGoatId, setFormGoatId, placeholder, id, goatsList
+  formGoatId, setFormGoatId, placeholder, id, goatsList,
+  actionIcon, onActionClick
 }: {
   refEl: React.RefObject<HTMLDivElement | null>;
   searchVal: string;
@@ -43,6 +44,8 @@ const GoatSearchDropdown = ({
   placeholder: string;
   id: string;
   goatsList: Goat[];
+  actionIcon?: React.ReactNode;
+  onActionClick?: () => void;
 }) => (
   <div ref={refEl} className="relative">
     <div className="relative">
@@ -50,13 +53,22 @@ const GoatSearchDropdown = ({
       <input
         id={id}
         inputMode="numeric"
-        className="w-full h-10 pl-9 pr-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+        className={`w-full h-10 pl-9 ${actionIcon ? 'pr-10' : 'pr-3'} rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all`}
         placeholder={placeholder}
         value={searchVal}
         onChange={(e) => { setSearch(e.target.value); setShowDropdown(true); }}
         onFocus={() => setShowDropdown(true)}
         autoComplete="off"
       />
+      {actionIcon && (
+        <button
+          type="button"
+          onClick={onActionClick}
+          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full flex items-center justify-center transition-colors hover:bg-gray-100"
+        >
+          {actionIcon}
+        </button>
+      )}
     </div>
     {showDropdown && (
       <div className="absolute z-20 w-full bg-card border border-input rounded-lg mt-1 max-h-44 overflow-y-auto shadow-xl">
@@ -116,6 +128,8 @@ export const DashboardPage: React.FC = () => {
 
   // Filtered dropdown states
   const [pendingDewormingGoats, setPendingDewormingGoats] = useState<Goat[]>([]);
+  const [alreadyDewormedGoats, setAlreadyDewormedGoats] = useState<Goat[]>([]);
+  const [isAdditionalDeworming, setIsAdditionalDeworming] = useState(false);
   const [pendingVaccinationGoats, setPendingVaccinationGoats] = useState<Goat[]>([]);
   const [allWeights, setAllWeights] = useState<WeightRecord[]>([]);
 
@@ -126,6 +140,7 @@ export const DashboardPage: React.FC = () => {
     totalGoats: 0,
     activeGoats: 0,
     soldGoats: 0,
+    deadGoats: 0,
     weightDue: 0,
     pendingDeworming: 0,
     pendingVaccination: 0,
@@ -200,7 +215,8 @@ export const DashboardPage: React.FC = () => {
       if (farmerGoats.length > 0) {
         const active = farmerGoats.filter((g) => g.status === 'active');
         const sold = farmerGoats.filter((g) => g.status === 'sold');
-        setStats((prev) => ({ ...prev, totalGoats: farmerGoats.length, activeGoats: active.length, soldGoats: sold.length }));
+        const dead = farmerGoats.filter((g) => g.status === 'deceased');
+        setStats((prev) => ({ ...prev, totalGoats: farmerGoats.length, activeGoats: active.length, soldGoats: sold.length, deadGoats: dead.length }));
         setGoatsList(active);
         setSalesChartData(computeTrend(farmerGoats));
         setLoading(false);
@@ -238,10 +254,12 @@ export const DashboardPage: React.FC = () => {
         }
       });
 
+      const freshDead = allGoats.filter((g) => g.status === 'deceased');
       setStats({
         totalGoats: allGoats.length,
         activeGoats: freshActive.length,
         soldGoats: freshSold.length,
+        deadGoats: freshDead.length,
         weightDue: weightDue.length,
         pendingDeworming: deworm.length,
         pendingVaccination: vacc.length,
@@ -250,6 +268,9 @@ export const DashboardPage: React.FC = () => {
       });
       setGoatsList(freshActive);
       setPendingDewormingGoats(deworm);
+      
+      const dewormIds = new Set(deworm.map(d => d.id));
+      setAlreadyDewormedGoats(freshActive.filter(g => !dewormIds.has(g.id)));
       setPendingVaccinationGoats(vacc);
       setAllWeights(localWeights);
       setWeightDueGoats(weightDue);
@@ -257,9 +278,9 @@ export const DashboardPage: React.FC = () => {
 
       if (freshActive.length > 0) {
         const first = freshActive[0];
-        setWeightGoatSearch(first.earTagNumber);
+        setWeightGoatSearch('');
         setSaleGoatSearch(first.earTagNumber);
-        setWeightForm((prev) => ({ ...prev, goatId: first.id, weightNumber: getNextAvailableMonth(first.id, localWeights) }));
+        setWeightForm((prev) => ({ ...prev, goatId: '', weightNumber: '1' }));
         setSaleForm((prev) => ({ ...prev, goatId: first.id }));
       }
       if (vacc.length > 0) {
@@ -463,6 +484,7 @@ export const DashboardPage: React.FC = () => {
         goatId: dewormingForm.goatId,
         dewormingDate: new Date(dewormingForm.dewormingDate),
         status: 'dewormed',
+        remarks: isAdditionalDeworming ? 'additional' : undefined,
       });
       showToast('success', 'Deworming recorded successfully');
       setShowDewormingModal(false);
@@ -571,11 +593,12 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: undefined },
-          { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:emerald-400', onClick: undefined },
-          { title: 'Sold', value: stats.soldGoats, gradient: 'from-amber-500/20 via-amber-500/10 to-transparent', border: 'border-amber-500/20', text: 'text-amber-600 dark:text-amber-400', onClick: undefined },
+          { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: () => navigate('/goats', { state: { usr: { status: 'all' } } }) },
+          { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', onClick: () => navigate('/goats', { state: { usr: { status: 'active' } } }) },
+          { title: 'Sold', value: stats.soldGoats, gradient: 'from-amber-500/20 via-amber-500/10 to-transparent', border: 'border-amber-500/20', text: 'text-amber-600 dark:text-amber-400', onClick: () => navigate('/goats', { state: { usr: { status: 'sold' } } }) },
+          { title: 'Dead', value: stats.deadGoats, gradient: 'from-slate-500/20 via-slate-500/10 to-transparent', border: 'border-slate-500/20', text: 'text-slate-600 dark:text-slate-400', onClick: () => navigate('/goats', { state: { usr: { status: 'deceased' } } }) },
           { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
           { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
           { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: undefined },
@@ -747,7 +770,7 @@ export const DashboardPage: React.FC = () => {
                     {[['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
                       .filter(([v]) => !allWeights.some(w => w.goatId === weightForm.goatId && w.isRecorded && Number(w.weightNumber) === Number(v)))
                       .map(([v, l]) => (
-                      <option key={v} value={v}>{l}</option>
+                      <option key={v} value={v} className="bg-background text-foreground">{l}</option>
                     ))}
                   </select>
                 </div>
@@ -871,7 +894,14 @@ export const DashboardPage: React.FC = () => {
             <CardContent>
               <form onSubmit={handleDewormingSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="dewormingGoatSearch">Search Goat (Ear Tag)</Label>
+                  <div className="mb-2">
+                    <Label htmlFor="dewormingGoatSearch">Search Goat (Ear Tag)</Label>
+                  </div>
+                  {isAdditionalDeworming && (
+                    <div className="text-xs text-emerald-600 mb-2 font-medium">
+                      Select from goats that have already been dewormed
+                    </div>
+                  )}
                   <GoatSearchDropdown
                     refEl={dewormingRef}
                     searchVal={dewormingSearch}
@@ -882,7 +912,17 @@ export const DashboardPage: React.FC = () => {
                     setFormGoatId={(id, tag) => { setDewormingForm({ ...dewormingForm, goatId: id }); setDewormingSearch(tag); }}
                     placeholder="Type ear tag number..."
                     id="dewormingGoatSearch"
-                    goatsList={pendingDewormingGoats}
+                    goatsList={isAdditionalDeworming ? alreadyDewormedGoats : pendingDewormingGoats}
+                    onActionClick={() => setIsAdditionalDeworming(!isAdditionalDeworming)}
+                    actionIcon={
+                      <div className={`p-1 rounded-full flex items-center justify-center transition-colors ${
+                        isAdditionalDeworming 
+                          ? 'bg-emerald-500 text-white shadow-sm' 
+                          : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                      }`}>
+                        <Plus className="h-4 w-4" />
+                      </div>
+                    }
                   />
                 </div>
                 <div>
@@ -1000,7 +1040,7 @@ export const DashboardPage: React.FC = () => {
                     <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{computedSaleAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                   <div className="flex justify-between border-t border-dashed pt-2 mt-1">
-                    <span className="text-muted-foreground font-medium">Net Profit:</span>
+                    <span className="text-muted-foreground font-medium">Gross Profit:</span>
                     <span className={`font-bold text-base ${computedNetProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
                       ₹{computedNetProfit.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>

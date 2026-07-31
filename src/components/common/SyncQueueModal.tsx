@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, RefreshCw, CheckCircle, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import * as indexedDB from '@/lib/indexeddb';
@@ -61,23 +62,23 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div 
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+        className="bg-card rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden border border-border"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <div className="p-6 border-b border-border flex items-center justify-between bg-muted/30">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Sync Status</h2>
-            <p className="text-sm text-slate-500 mt-1">Manage your offline edits and history</p>
+            <h2 className="text-xl font-bold text-foreground">Sync Status</h2>
+            <p className="text-sm text-muted-foreground mt-1">Manage your offline edits and history</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-full transition-colors"
+            className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-full transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -87,7 +88,7 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
           {/* Pending Queue Section */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
                 <Clock className="w-5 h-5 text-amber-500" />
                 Pending Actions ({pending.length})
               </h3>
@@ -103,19 +104,19 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
             </div>
             
             {pending.length === 0 ? (
-              <div className="p-4 bg-slate-50 rounded-lg text-center text-slate-500 border border-slate-100">
+              <div className="p-4 bg-muted/20 rounded-lg text-center text-muted-foreground border border-border">
                 All caught up! No pending edits.
               </div>
             ) : (
               <ul className="space-y-3">
                 {pending.map(action => (
-                  <li key={action.id} className="p-4 bg-amber-50 border border-amber-100 rounded-xl flex items-center justify-between">
-                    <span className="font-medium text-amber-900">
+                  <li key={action.id} className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-between">
+                    <span className="font-medium text-amber-700 dark:text-amber-400">
                       {action.type === 'create' ? 'Goat creation pending' : 
                        action.type === 'update' ? `Goat ${action.data.updates?.earTagNumber || 'edit'} pending` :
                        'Action pending'}
                     </span>
-                    <span className="text-xs text-amber-700 bg-amber-100 px-2 py-1 rounded-full">Queued</span>
+                    <span className="text-xs text-amber-700 dark:text-amber-400 bg-amber-500/20 px-2 py-1 rounded-full">Queued</span>
                   </li>
                 ))}
               </ul>
@@ -124,21 +125,21 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
 
           {/* Sync History Section */}
           <section>
-            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2 mb-4">
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-4">
               <CheckCircle className="w-5 h-5 text-emerald-500" />
               Sync History
             </h3>
             
             {history.length === 0 ? (
-              <div className="p-4 bg-slate-50 rounded-lg text-center text-slate-500 border border-slate-100">
+              <div className="p-4 bg-muted/20 rounded-lg text-center text-muted-foreground border border-border">
                 No recent sync history.
               </div>
             ) : (
               <ul className="space-y-3">
                 {history.slice(0, 20).map(item => (
-                  <li key={item.id} className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex flex-col">
-                    <span className="font-medium text-emerald-900">{item.description}</span>
-                    <span className="text-xs text-emerald-600 mt-1">
+                  <li key={item.id} className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex flex-col">
+                    <span className="font-medium text-emerald-700 dark:text-emerald-400">{item.description}</span>
+                    <span className="text-xs text-emerald-600/70 dark:text-emerald-400/70 mt-1">
                       {new Date(item.syncedAt).toLocaleString()}
                     </span>
                   </li>
@@ -148,12 +149,13 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
           </section>
         </div>
 
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+        <div className="p-4 border-t border-border bg-muted/30 flex justify-end">
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

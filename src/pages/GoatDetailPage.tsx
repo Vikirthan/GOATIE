@@ -138,7 +138,7 @@ export const GoatDetailPage: React.FC = () => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-foreground">
-              {goat.status === 'sold' ? 'Sold' : goat.earTagNumber}
+              {goat.earTagNumber}
             </h1>
             <StatusBadge status={goat.status} />
           </div>
@@ -227,7 +227,7 @@ export const GoatDetailPage: React.FC = () => {
               <span className="font-semibold text-emerald-600 dark:text-emerald-400">₹{goat.saleInfo.saleAmount.toLocaleString('en-IN')}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block text-xs mb-0.5">Net Profit</span>
+              <span className="text-muted-foreground block text-xs mb-0.5">Gross Profit</span>
               <span className={`font-semibold ${goat.saleInfo.netProfit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500'}`}>
                 ₹{goat.saleInfo.netProfit.toLocaleString('en-IN')}
               </span>
@@ -307,10 +307,17 @@ export const GoatDetailPage: React.FC = () => {
           <h2 className="font-semibold text-foreground">Deworming Status</h2>
         </div>
         <div className="space-y-2">
-          <StatusRow
-            date={deworming.length > 0 ? deworming[deworming.length - 1].dewormingDate : undefined}
-            label="Deworming"
-          />
+          {deworming.length > 0 ? (
+            deworming.map((d, i) => (
+              <StatusRow
+                key={d.id || i}
+                date={d.dewormingDate}
+                label={i === 0 ? "Deworming" : `Additional-${i}`}
+              />
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">No records</p>
+          )}
         </div>
       </div>
 

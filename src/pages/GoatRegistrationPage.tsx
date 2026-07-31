@@ -59,14 +59,14 @@ export const GoatRegistrationPage: React.FC = () => {
 
   const handleWeightChange = (val: string) => {
     const weight = parseFloat(val);
-    if (formData.purchasePricePerKg) {
-      const rate = parseFloat(formData.purchasePricePerKg);
-      const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
-      setFormData({ ...formData, purchaseWeight: val, purchasePrice: total });
-    } else if (formData.purchasePrice) {
+    if (formData.purchasePrice) {
       const total = parseFloat(formData.purchasePrice);
       const perKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
       setFormData({ ...formData, purchaseWeight: val, purchasePricePerKg: perKg });
+    } else if (formData.purchasePricePerKg) {
+      const rate = parseFloat(formData.purchasePricePerKg);
+      const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
+      setFormData({ ...formData, purchaseWeight: val, purchasePrice: total });
     } else {
       setFormData({ ...formData, purchaseWeight: val });
     }

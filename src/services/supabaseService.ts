@@ -219,12 +219,13 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
   }
 
   try {
-    // Query all goats with this ear tag to avoid the "multiple rows" error from maybeSingle()
+    // Query all active goats with this ear tag to avoid duplicates for active herd
     const { data, error } = await supabase
       .from('goats')
       .select('*, sales(*)')
       .eq('ear_tag_number', earTagNumber)
-      .eq('farmer_id', farmerId);
+      .eq('farmer_id', farmerId)
+      .eq('status', 'active');
       
     if (error) throw error;
     if (!data || data.length === 0) {
@@ -233,7 +234,7 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
     }
     
     // Find the active one, or just return the first one if none are active
-    const activeGoat = data.find(g => g.status === 'active') || data[0];
+    const activeGoat = data[0];
     return mapGoatData(activeGoat);
   } catch (err: any) {
     const errMsg = err?.message || err?.error || err?.toString() || '';
