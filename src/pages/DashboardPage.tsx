@@ -211,12 +211,44 @@ export const DashboardPage: React.FC = () => {
       setLoading(true);
 
       const localGoats = await indexedDB.getAllItems<Goat>('goats');
+      const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
       const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
       if (farmerGoats.length > 0) {
         const active = farmerGoats.filter((g) => g.status === 'active');
         const sold = farmerGoats.filter((g) => g.status === 'sold');
         const dead = farmerGoats.filter((g) => g.status === 'deceased');
-        setStats((prev) => ({ ...prev, totalGoats: farmerGoats.length, activeGoats: active.length, soldGoats: sold.length, deadGoats: dead.length }));
+        
+        let localSemmari = 0;
+        let localVelladu = 0;
+        
+        active.forEach(goat => {
+          const goatWeights = localWeights
+            .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
+            .sort((a, b) => {
+              const timeA = new Date(a.recordedDate || a.createdAt).getTime();
+              const timeB = new Date(b.recordedDate || b.createdAt).getTime();
+              return timeB - timeA;
+            });
+          
+          const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
+          const variant = (goat.variant || '').trim().toLowerCase();
+
+          if (variant.includes('semmari')) {
+             localSemmari += Number(currentWeight) || 0;
+          } else if (variant.includes('velladu')) {
+             localVelladu += Number(currentWeight) || 0;
+          }
+        });
+
+        setStats((prev) => ({ 
+          ...prev, 
+          totalGoats: farmerGoats.length, 
+          activeGoats: active.length, 
+          soldGoats: sold.length, 
+          deadGoats: dead.length,
+          semmariWeight: parseFloat(localSemmari.toFixed(2)),
+          velladuWeight: parseFloat(localVelladu.toFixed(2)),
+        }));
         setGoatsList(active);
         setSalesChartData(computeTrend(farmerGoats));
         setLoading(false);
