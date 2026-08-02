@@ -1,4 +1,4 @@
-import { addMonths, startOfDay } from 'date-fns';
+import { addMonths, startOfDay, format } from 'date-fns';
 import JsBarcode from 'jsbarcode';
 
 // QR Code generation
@@ -149,21 +149,13 @@ export function formatCurrency(amount: number, currency: string = 'INR'): string
 // Format date
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-IN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  return format(d, 'dd/MM/yyyy');
 }
 
 // Format short date
 export function formatShortDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-IN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
+  return format(d, 'dd/MM/yyyy');
 }
 
 // Get initials from name

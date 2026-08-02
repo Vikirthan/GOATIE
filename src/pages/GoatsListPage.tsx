@@ -196,7 +196,7 @@ export const GoatsListPage: React.FC = () => {
 
   const loadGoatsList = async (silent = false) => {
     if (!user) return;
-    if (!silent) setLoading(true);
+    if (!silent && goats.length === 0) setLoading(true);
     else setRefreshing(true);
     try {
       // 1. Instant local load
@@ -300,6 +300,12 @@ export const GoatsListPage: React.FC = () => {
         const currentWeight = latestWeightMap.get(g.id) ?? g.purchaseWeight;
         return currentWeight >= wf.min && currentWeight <= wf.max;
       });
+      // Sort ascending by weight (small to big)
+      result.sort((a, b) => {
+        const weightA = latestWeightMap.get(a.id) ?? a.purchaseWeight;
+        const weightB = latestWeightMap.get(b.id) ?? b.purchaseWeight;
+        return weightA - weightB;
+      });
     }
     const wgf = parseWeightGainFilter(weightGainFilter);
     if (wgf) {
@@ -319,6 +325,18 @@ export const GoatsListPage: React.FC = () => {
         
         const gain = latest - previous;
         return gain >= wgf.min && gain <= wgf.max;
+      });
+      // Sort ascending by weight gain
+      result.sort((a, b) => {
+        const getGain = (g: Goat) => {
+          const gWeights = weightRecords
+            .filter(w => w.goatId === g.id && w.isRecorded && w.weight > 0)
+            .sort((x, y) => y.weightNumber - x.weightNumber);
+          const latest = gWeights[0]?.weight || 0;
+          const previous = gWeights.length > 1 ? gWeights[1].weight : g.purchaseWeight;
+          return latest - previous;
+        };
+        return getGain(a) - getGain(b);
       });
     }
     setFilteredGoats(result);
@@ -742,11 +760,18 @@ export const GoatsListPage: React.FC = () => {
                         <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums">
                           {latestWeightMap.get(goat.id) ?? goat.purchaseWeight}{' '}
                           <span className="text-muted-foreground text-xs">kg</span>
-                          {latestWeightMap.has(goat.id) && latestWeightMap.get(goat.id) !== goat.purchaseWeight && (
-                            <span className="text-muted-foreground text-xs block leading-none">
-                              (was {goat.purchaseWeight})
-                            </span>
-                          )}
+                          {(() => {
+                            if (!latestWeightMap.has(goat.id)) return null;
+                            const current = latestWeightMap.get(goat.id)!;
+                            if (current === goat.purchaseWeight) return null;
+                            const gain = current - goat.purchaseWeight;
+                            const isPositive = gain > 0;
+                            return (
+                              <span className={`text-xs block leading-none mt-1 font-medium ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                                {isPositive ? '+' : ''}{Number(gain.toFixed(2))} kg
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3.5 text-foreground text-right whitespace-nowrap tabular-nums font-medium">
                           ₹{goat.purchasePrice.toLocaleString('en-IN')}
@@ -857,9 +882,18 @@ export const GoatsListPage: React.FC = () => {
                         <span className="font-medium text-foreground tabular-nums">
                           {latestWeightMap.get(goat.id) ?? goat.purchaseWeight} kg
                         </span>
-                        {latestWeightMap.has(goat.id) && latestWeightMap.get(goat.id) !== goat.purchaseWeight && (
-                          <span className="text-muted-foreground text-xs"> (was {goat.purchaseWeight} kg)</span>
-                        )}
+                        {(() => {
+                          if (!latestWeightMap.has(goat.id)) return null;
+                          const current = latestWeightMap.get(goat.id)!;
+                          if (current === goat.purchaseWeight) return null;
+                          const gain = current - goat.purchaseWeight;
+                          const isPositive = gain > 0;
+                          return (
+                            <span className={`text-xs ml-1 font-medium ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+                              ({isPositive ? '+' : ''}{Number(gain.toFixed(2))} kg)
+                            </span>
+                          );
+                        })()}
                       </div>
                       <div>
                         <span className="text-muted-foreground text-xs block mb-0.5">Price</span>

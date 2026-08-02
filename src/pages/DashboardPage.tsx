@@ -24,6 +24,7 @@ import * as indexedDB from '@/lib/indexeddb';
 import { supabase } from '@/lib/supabase';
 import { getAllWeights } from '@/services/supabaseService';
 import { Goat, WeightRecord } from '@/types';
+import { formatDate } from '@/utils/helpers';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
   ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag, RefreshCw
@@ -205,10 +206,10 @@ export const DashboardPage: React.FC = () => {
     return trend.map((t) => ({ month: t.month, sales: t.sales }));
   };
 
-  const loadData = async () => {
+  const loadData = async (showLoader = true) => {
     if (!user) return;
     try {
-      setLoading(true);
+      if (showLoader && goatsList.length === 0) setLoading(true);
 
       const localGoats = await indexedDB.getAllItems<Goat>('goats');
       const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
@@ -257,7 +258,7 @@ export const DashboardPage: React.FC = () => {
       const allGoats = await getFarmerGoats(user.id);
       const freshActive = allGoats.filter((g) => g.status === 'active');
       const freshSold = allGoats.filter((g) => g.status === 'sold');
-      const [weightDue, deworm, vacc, localWeights] = await Promise.all([
+      const [weightDue, deworm, vacc, freshWeights] = await Promise.all([
         getGoatsDueForWeight(user.id),
         getPendingDeworming(user.id),
         getPendingVaccination(user.id),
@@ -268,7 +269,7 @@ export const DashboardPage: React.FC = () => {
       let velladuWeight = 0;
 
       freshActive.forEach((goat) => {
-        const goatWeights = localWeights
+        const goatWeights = freshWeights
           .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
           .sort((a, b) => {
             const timeA = new Date(a.recordedDate || a.createdAt).getTime();
@@ -745,7 +746,7 @@ export const DashboardPage: React.FC = () => {
                     <div>
                       <span className="font-semibold text-sm">{goat.earTagNumber}</span>
                       <span className="text-xs text-muted-foreground ml-2">{goat.variant}</span>
-                      <p className="text-xs text-orange-500 mt-0.5">Weight {weight.weightNumber} overdue since {new Date(weight.dueDate).toLocaleDateString('en-IN')}</p>
+                      <p className="text-xs text-orange-500 mt-0.5">Weight {weight.weightNumber} overdue since {formatDate(weight.dueDate)}</p>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
                   </button>

@@ -13,6 +13,7 @@ import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { getGoatVariants } from '@/services/googleSheets';
 import { GoatVariant } from '@/types';
 import { ArrowLeft, Calculator } from 'lucide-react';
+import { format } from 'date-fns';
 
 export const GoatRegistrationPage: React.FC = () => {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ export const GoatRegistrationPage: React.FC = () => {
   const [variants, setVariants] = useState<GoatVariant[]>([]);
   const [formData, setFormData] = useState({
     earTagNumber: '',
-    purchaseDate: '',
+    purchaseDate: format(new Date(), 'yyyy-MM-dd'),
     purchaseWeight: '',
     variant: 'SEMMARI',
     gender: 'male',

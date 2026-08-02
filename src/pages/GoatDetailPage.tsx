@@ -11,10 +11,12 @@ import {
 } from '@/services/firebaseService';
 import { Goat, WeightRecord, PPRVaccinationRecord, DewormingRecord } from '@/types';
 
+import { format } from 'date-fns';
+
 const formatDate = (date: Date | string | undefined): string => {
   if (!date) return 'N/A';
   try {
-    return new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    return format(new Date(date), 'dd/MM/yyyy');
   } catch {
     return 'N/A';
   }
