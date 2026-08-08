@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
-import { LoadingSpinner } from '@/components/common/Loaders';
 import { showToast } from '@/components/common/Toast';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
@@ -97,7 +96,6 @@ export const DashboardPage: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: queryData, isLoading: queryLoading, refetch } = useDashboardData(user?.id);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const loadData = () => refetch();
 
@@ -208,7 +206,6 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     if (queryLoading) {
-      setLoading(true);
       return;
     }
     
@@ -295,8 +292,6 @@ export const DashboardPage: React.FC = () => {
           }
         } catch (error) {
           console.error('Error loading dashboard stats:', error);
-        } finally {
-          setLoading(false);
         }
       };
       
@@ -306,7 +301,6 @@ export const DashboardPage: React.FC = () => {
 
   const handleHardReload = async () => {
     try {
-      setLoading(true);
       // Unregister service workers
       if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();

@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGoatsData } from '@/hooks/useGoatsData';
 import { Button } from '@/components/ui/Button';
-import { LoadingSpinner, EmptyState } from '@/components/common/Loaders';
+import { EmptyState } from '@/components/common/Loaders';
 import { useAuth } from '@/context/AuthContext';
 import {
   createGoat,
