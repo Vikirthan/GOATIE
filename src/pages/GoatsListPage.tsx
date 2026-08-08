@@ -1,14 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { useGoatsData } from '@/hooks/useGoatsData';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner, EmptyState } from '@/components/common/Loaders';
 import { useAuth } from '@/context/AuthContext';
 import {
-  getFarmerGoats,
   createGoat,
   getGoatByEarTag,
-  getAllDeworming,
-  getAllVaccinations,
   recordVaccination,
   recordDeworming,
   recordWeight,
@@ -20,7 +19,6 @@ import {
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { supabase } from '@/lib/supabase';
-import { getAllWeights } from '@/services/supabaseService';
 import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
 import { Plus, Search, Download, Upload, Trash2, Edit2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
@@ -86,6 +84,12 @@ export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const { data: queryData, isLoading: queryLoading, refetch } = useGoatsData(user?.id);
+  const loadGoatsList = (silent = false) => {
+    if (!silent) setLoading(true);
+    refetch();
+  };
   const [goats, setGoats] = useState<Goat[]>([]);
   const [filteredGoats, setFilteredGoats] = useState<Goat[]>([]);
   const [loading, setLoading] = useState(true);
@@ -194,46 +198,44 @@ export const GoatsListPage: React.FC = () => {
     }
   };
 
-  const loadGoatsList = async (silent = false) => {
-    if (!user) return;
-    if (!silent && goats.length === 0) setLoading(true);
-    else setRefreshing(true);
-    try {
-      // 1. Instant local load
-      if (!silent) {
-        const localGoats = await indexedDB.getAllItems<Goat>('goats');
-        const filteredLocal = localGoats
-          .filter((g) => g.farmerId === user.id)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
-        const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-        setDewormingRecords(localDeworm);
-        setVaccineRecords(localVacc);
-        if (filteredLocal.length > 0) {
-          setGoats(filteredLocal);
-          setLoading(false);
-        }
-      }
-
-      // 2. Fresh load from server
-      const [freshGoats, freshDeworm, freshVacc, freshWeights] = await Promise.all([
-        getFarmerGoats(user.id),
-        getAllDeworming(),
-        getAllVaccinations(),
-        isSupabaseEnabled() ? getAllWeights() : Promise.resolve([] as WeightRecord[]),
-      ]);
-
-      setGoats(freshGoats);
-      setDewormingRecords(freshDeworm);
-      setVaccineRecords(freshVacc);
-      setWeightRecords(freshWeights);
-    } catch (error) {
-      console.error('Error loading goats:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  useEffect(() => {
+    if (queryLoading) {
+      setLoading(true);
+      return;
     }
-  };
+    
+    if (queryData && user) {
+      const loadLocalData = async () => {
+        try {
+          const localGoats = await indexedDB.getAllItems<Goat>('goats');
+          const filteredLocal = localGoats
+            .filter((g) => g.farmerId === user.id)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
+          const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+          
+          if (filteredLocal.length > 0) {
+            setGoats(filteredLocal);
+            setDewormingRecords(localDeworm);
+            setVaccineRecords(localVacc);
+          }
+
+          const { freshGoats, freshDeworm, freshVacc, freshWeights } = queryData;
+          setGoats(freshGoats);
+          setDewormingRecords(freshDeworm);
+          setVaccineRecords(freshVacc);
+          setWeightRecords(freshWeights);
+        } catch (error) {
+          console.error('Error loading goats:', error);
+        } finally {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      };
+      
+      loadLocalData();
+    }
+  }, [queryData, queryLoading, user]);
 
   const handleSyncData = async () => {
     if (!user) return;
@@ -250,25 +252,23 @@ export const GoatsListPage: React.FC = () => {
   };
 
   useEffect(() => {
-    loadGoatsList();
-
-    const handleSync = () => loadGoatsList();
+    const handleSync = () => queryClient.invalidateQueries({ queryKey: ['goatsData'] });
     window.addEventListener('data-synced', handleSync);
 
     if (isSupabaseEnabled()) {
       const channel = supabase
         .channel('public:goats-list')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
-          loadGoatsList();
+          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'weights' }, () => {
-          loadGoatsList();
+          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
-          loadGoatsList();
+          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, () => {
-          loadGoatsList();
+          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
         })
         .subscribe();
 
@@ -281,7 +281,7 @@ export const GoatsListPage: React.FC = () => {
     return () => {
       window.removeEventListener('data-synced', handleSync);
     };
-  }, [user]);
+  }, [user, queryClient]);
 
   useEffect(() => {
     let result = goats;
@@ -515,7 +515,7 @@ export const GoatsListPage: React.FC = () => {
     return record ? 'Dewormed' : 'Not done';
   };
 
-  if (loading) return <LoadingSpinner message="Loading goats..." />;
+  // No loading check to prevent full page spinner
 
   return (
     <div className="space-y-6">

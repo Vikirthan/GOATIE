@@ -1,9 +1,12 @@
 import React from 'react';
 
 export const LoadingSpinner: React.FC<{ message?: string }> = ({ message }) => (
-  <div className="flex flex-col items-center justify-center py-12">
-    <div className="h-12 w-12 animate-spin rounded-full border-4 border-muted border-t-primary" />
-    {message && <p className="mt-4 text-sm text-muted-foreground">{message}</p>}
+  <div className="flex flex-col items-center justify-center py-12 min-h-[300px]">
+    <div className="relative flex items-center justify-center">
+      <div className="h-16 w-16 animate-spin rounded-full border-4 border-muted border-t-primary" />
+      <img src="/android-chrome-192x192.png" alt="Goatie" className="absolute h-8 w-8 animate-pulse rounded-sm" />
+    </div>
+    {message && <p className="mt-6 text-sm font-medium text-muted-foreground animate-pulse">{message}</p>}
   </div>
 );
 

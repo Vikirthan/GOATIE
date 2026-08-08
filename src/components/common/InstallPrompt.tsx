@@ -9,6 +9,11 @@ const isIOS = (): boolean => {
   );
 };
 
+// Detect Mobile
+const isMobile = (): boolean => {
+  return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent.toLowerCase()) || window.innerWidth <= 768;
+};
+
 // Detect if already running as installed PWA
 const isInStandaloneMode = (): boolean => {
   return (
@@ -35,6 +40,9 @@ export const InstallPrompt: React.FC = () => {
   useEffect(() => {
     // Don't show if already installed
     if (isInStandaloneMode()) return;
+
+    // Don't show if not mobile
+    if (!isMobile()) return;
 
     // Don't show if user dismissed recently
     const dismissedUntil = localStorage.getItem(DISMISS_KEY);
