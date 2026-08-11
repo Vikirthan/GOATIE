@@ -204,32 +204,25 @@ export const DashboardPage: React.FC = () => {
     return trend.map((t) => ({ month: t.month, sales: t.sales }));
   };
 
+  // 1. Initial Local Data Load (Offline First)
   useEffect(() => {
-    if (queryLoading) {
-      return;
-    }
-    
-    if (queryData && user) {
-      const loadLocalData = async () => {
-        try {
-          const localGoats = await indexedDB.getAllItems<Goat>('goats');
-          const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-          const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
-          // If no network data, try to render local
-          if (farmerGoats.length > 0) {
-            // (Local loading logic omitted for brevity as it will be overwritten by fresh data if available)
-          }
-
-          const { allGoats, weightDue, deworm, vacc, freshWeights } = queryData;
-          const freshActive = allGoats.filter((g) => g.status === 'active');
-          const freshSold = allGoats.filter((g) => g.status === 'sold');
-          const freshDead = allGoats.filter((g) => g.status === 'deceased');
-
+    if (!user) return;
+    const loadLocalData = async () => {
+      try {
+        const localGoats = await indexedDB.getAllItems<Goat>('goats');
+        const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+        const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
+        
+        if (farmerGoats.length > 0) {
+          const localActive = farmerGoats.filter((g) => g.status === 'active');
+          const localSold = farmerGoats.filter((g) => g.status === 'sold');
+          const localDead = farmerGoats.filter((g) => g.status === 'deceased');
+          
           let semmariWeight = 0;
           let velladuWeight = 0;
 
-          freshActive.forEach((goat) => {
-            const goatWeights = freshWeights
+          localActive.forEach((goat) => {
+            const goatWeights = localWeights
               .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
               .sort((a, b) => {
                 const timeA = new Date(a.recordedDate || a.createdAt).getTime();
@@ -247,55 +240,107 @@ export const DashboardPage: React.FC = () => {
             }
           });
 
-          setStats({
-            totalGoats: allGoats.length,
-            activeGoats: freshActive.length,
-            soldGoats: freshSold.length,
-            deadGoats: freshDead.length,
-            weightDue: weightDue.length,
-            pendingDeworming: deworm.length,
-            pendingVaccination: vacc.length,
+          setStats((prev) => ({
+            ...prev,
+            totalGoats: farmerGoats.length,
+            activeGoats: localActive.length,
+            soldGoats: localSold.length,
+            deadGoats: localDead.length,
             semmariWeight: parseFloat(semmariWeight.toFixed(2)),
             velladuWeight: parseFloat(velladuWeight.toFixed(2)),
-          });
+          }));
 
-          setGoatsList(freshActive);
-          setPendingDewormingGoats(deworm);
-          
-          const dewormIds = new Set(deworm.map(d => d.id));
-          setAlreadyDewormedGoats(freshActive.filter(g => !dewormIds.has(g.id)));
-          setPendingVaccinationGoats(vacc);
+          setGoatsList(localActive);
           setAllWeights(localWeights);
-          setWeightDueGoats(weightDue);
-          setSalesChartData(computeTrend(allGoats));
-
-          if (freshActive.length > 0) {
-            const first = freshActive[0];
-            setWeightGoatSearch('');
-            setSaleGoatSearch(first.earTagNumber);
-            setWeightForm((prev) => ({ ...prev, goatId: '', weightNumber: '1' }));
-            setSaleForm((prev) => ({ ...prev, goatId: first.id }));
+          setSalesChartData(computeTrend(farmerGoats));
+          
+          if (localActive.length > 0) {
+            setSaleForm((prev) => ({ ...prev, goatId: prev.goatId || localActive[0].id }));
           }
-          if (vacc.length > 0) {
-            setVaccineSearch(vacc[0].earTagNumber);
-            setVaccineForm((prev) => ({ ...prev, goatId: vacc[0].id }));
-          } else {
-            setVaccineSearch('');
-            setVaccineForm((prev) => ({ ...prev, goatId: '' }));
-          }
-          if (deworm.length > 0) {
-            setDewormingSearch(deworm[0].earTagNumber);
-            setDewormingForm((prev) => ({ ...prev, goatId: deworm[0].id }));
-          } else {
-            setDewormingSearch('');
-            setDewormingForm((prev) => ({ ...prev, goatId: '' }));
-          }
-        } catch (error) {
-          console.error('Error loading dashboard stats:', error);
         }
-      };
+      } catch (error) {
+        console.error('Error loading local dashboard data:', error);
+      }
+    };
+    loadLocalData();
+  }, [user]);
+
+  // 2. Network Data Sync (React Query)
+  useEffect(() => {
+    if (queryLoading || !queryData || !user) return;
+    
+    try {
+      const { allGoats, weightDue, deworm, vacc, freshWeights } = queryData;
+      const freshActive = allGoats.filter((g) => g.status === 'active');
+      const freshSold = allGoats.filter((g) => g.status === 'sold');
+      const freshDead = allGoats.filter((g) => g.status === 'deceased');
+
+      let semmariWeight = 0;
+      let velladuWeight = 0;
+
+      freshActive.forEach((goat) => {
+        const goatWeights = freshWeights
+          .filter((w) => w.goatId === goat.id && w.isRecorded && w.weight > 0)
+          .sort((a, b) => {
+            const timeA = new Date(a.recordedDate || a.createdAt).getTime();
+            const timeB = new Date(b.recordedDate || b.createdAt).getTime();
+            return timeB - timeA;
+          });
+        
+        const currentWeight = goatWeights.length > 0 ? goatWeights[0].weight : goat.purchaseWeight;
+        const variant = (goat.variant || '').trim().toLowerCase();
+
+        if (variant.includes('semmari')) {
+          semmariWeight += Number(currentWeight) || 0;
+        } else if (variant.includes('velladu')) {
+          velladuWeight += Number(currentWeight) || 0;
+        }
+      });
+
+      setStats({
+        totalGoats: allGoats.length,
+        activeGoats: freshActive.length,
+        soldGoats: freshSold.length,
+        deadGoats: freshDead.length,
+        weightDue: weightDue.length,
+        pendingDeworming: deworm.length,
+        pendingVaccination: vacc.length,
+        semmariWeight: parseFloat(semmariWeight.toFixed(2)),
+        velladuWeight: parseFloat(velladuWeight.toFixed(2)),
+      });
+
+      setGoatsList(freshActive);
+      setPendingDewormingGoats(deworm);
       
-      loadLocalData();
+      const dewormIds = new Set(deworm.map(d => d.id));
+      setAlreadyDewormedGoats(freshActive.filter(g => !dewormIds.has(g.id)));
+      setPendingVaccinationGoats(vacc);
+      setWeightDueGoats(weightDue);
+      setSalesChartData(computeTrend(allGoats));
+
+      if (freshActive.length > 0) {
+        const first = freshActive[0];
+        setWeightGoatSearch('');
+        setSaleGoatSearch(first.earTagNumber);
+        setWeightForm((prev) => ({ ...prev, goatId: '', weightNumber: '1' }));
+        setSaleForm((prev) => ({ ...prev, goatId: first.id }));
+      }
+      if (vacc.length > 0) {
+        setVaccineSearch(vacc[0].earTagNumber);
+        setVaccineForm((prev) => ({ ...prev, goatId: vacc[0].id }));
+      } else {
+        setVaccineSearch('');
+        setVaccineForm((prev) => ({ ...prev, goatId: '' }));
+      }
+      if (deworm.length > 0) {
+        setDewormingSearch(deworm[0].earTagNumber);
+        setDewormingForm((prev) => ({ ...prev, goatId: deworm[0].id }));
+      } else {
+        setDewormingSearch('');
+        setDewormingForm((prev) => ({ ...prev, goatId: '' }));
+      }
+    } catch (error) {
+      console.error('Error processing network dashboard data:', error);
     }
   }, [queryData, queryLoading, user]);
 

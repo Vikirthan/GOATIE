@@ -198,42 +198,46 @@ export const GoatsListPage: React.FC = () => {
     }
   };
 
+  // 1. Initial Local Data Load (Offline First)
   useEffect(() => {
-    if (queryLoading) {
-      setLoading(true);
-      return;
-    }
-    
-    if (queryData && user) {
-      const loadLocalData = async () => {
-        try {
-          const localGoats = await indexedDB.getAllItems<Goat>('goats');
-          const filteredLocal = localGoats
-            .filter((g) => g.farmerId === user.id)
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
-          const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-          
-          if (filteredLocal.length > 0) {
-            setGoats(filteredLocal);
-            setDewormingRecords(localDeworm);
-            setVaccineRecords(localVacc);
-          }
-
-          const { freshGoats, freshDeworm, freshVacc, freshWeights } = queryData;
-          setGoats(freshGoats);
-          setDewormingRecords(freshDeworm);
-          setVaccineRecords(freshVacc);
-          setWeightRecords(freshWeights);
-        } catch (error) {
-          console.error('Error loading goats:', error);
-        } finally {
-          setLoading(false);
-          setRefreshing(false);
+    if (!user) return;
+    const loadLocalData = async () => {
+      try {
+        const localGoats = await indexedDB.getAllItems<Goat>('goats');
+        const filteredLocal = localGoats
+          .filter((g) => g.farmerId === user.id)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
+        const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+        const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+        
+        if (filteredLocal.length > 0) {
+          setGoats(filteredLocal);
+          setDewormingRecords(localDeworm);
+          setVaccineRecords(localVacc);
+          setWeightRecords(localWeights);
         }
-      };
-      
-      loadLocalData();
+      } catch (error) {
+        console.error('Error loading local goats data:', error);
+      }
+    };
+    loadLocalData();
+  }, [user]);
+
+  // 2. Network Data Sync (React Query)
+  useEffect(() => {
+    if (queryLoading || !queryData || !user) return;
+    
+    try {
+      const { freshGoats, freshDeworm, freshVacc, freshWeights } = queryData;
+      setGoats(freshGoats);
+      setDewormingRecords(freshDeworm);
+      setVaccineRecords(freshVacc);
+      setWeightRecords(freshWeights);
+    } catch (error) {
+      console.error('Error processing network goats data:', error);
+    } finally {
+      setRefreshing(false);
     }
   }, [queryData, queryLoading, user]);
 
