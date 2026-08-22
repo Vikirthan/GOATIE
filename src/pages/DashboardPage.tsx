@@ -131,6 +131,7 @@ export const DashboardPage: React.FC = () => {
   const [isAdditionalDeworming, setIsAdditionalDeworming] = useState(false);
   const [pendingVaccinationGoats, setPendingVaccinationGoats] = useState<Goat[]>([]);
   const [allWeights, setAllWeights] = useState<WeightRecord[]>([]);
+  const [isAdditionalWeight, setIsAdditionalWeight] = useState(false);
 
   // Weight gain display
   const [prevWeight, setPrevWeight] = useState<number | null>(null);
@@ -178,7 +179,8 @@ export const DashboardPage: React.FC = () => {
     const recordedMonths = goatWeights.map(w => Number(w.weightNumber));
     const available = [['1', '1st Month'], ['2', '2nd Month'], ['3', '3rd Month'], ['4', '4th Month']]
       .filter(([v]) => !recordedMonths.includes(Number(v)));
-    return available.length > 0 ? available[0][0] : '1';
+    // If all 4 mandatory monthly weights are already recorded, the next log is an extra weight (5, 6, ...)
+    return available.length > 0 ? available[0][0] : 'extra';
   };
 
   const getLast6Months = () => {
@@ -316,6 +318,7 @@ export const DashboardPage: React.FC = () => {
       setAlreadyDewormedGoats(freshActive.filter(g => !dewormIds.has(g.id)));
       setPendingVaccinationGoats(vacc);
       setWeightDueGoats(weightDue);
+      setAllWeights(freshWeights);
       setSalesChartData(computeTrend(allGoats));
 
       if (freshActive.length > 0) {
@@ -426,10 +429,18 @@ export const DashboardPage: React.FC = () => {
     const fetchPrev = async () => {
       try {
         const weights = await getGoatWeights(weightForm.goatId);
-        const wNum = parseInt(weightForm.weightNumber);
-        const prev = weights
-          .filter((w) => w.isRecorded && w.weight > 0 && w.weightNumber < wNum)
-          .sort((a, b) => b.weightNumber - a.weightNumber)[0];
+        let prev;
+        if (weightForm.weightNumber === 'extra') {
+          // Extra weights compare against the latest recorded weight (lowest higher number wins)
+          prev = weights
+            .filter((w) => w.isRecorded && w.weight > 0)
+            .sort((a, b) => b.weightNumber - a.weightNumber)[0];
+        } else {
+          const wNum = parseInt(weightForm.weightNumber);
+          prev = weights
+            .filter((w) => w.isRecorded && w.weight > 0 && w.weightNumber < wNum)
+            .sort((a, b) => b.weightNumber - a.weightNumber)[0];
+        }
         setPrevWeight(prev ? prev.weight : null);
       } catch {
         setPrevWeight(null);
@@ -474,9 +485,24 @@ export const DashboardPage: React.FC = () => {
     if (isNaN(parsedWeight) || parsedWeight <= 0) { showToast('error', 'Please enter a valid weight'); return; }
     setSubmitting(true);
     try {
+      // Resolve the concrete weight number. 'extra' means all 4 mandatory monthly weights
+      // are already recorded, so this becomes the next available number (5, 6, ...).
+      let weightNumber = parseInt(weightForm.weightNumber, 10);
+      if (weightForm.weightNumber === 'extra') {
+        const goatWeights = await getGoatWeights(weightForm.goatId);
+        const latestNumber = goatWeights
+          .filter((w) => w.isRecorded && w.weight > 0)
+          .reduce((max, w) => Math.max(max, w.weightNumber), 0);
+        weightNumber = latestNumber + 1;
+      }
+      if (isNaN(weightNumber) || weightNumber < 0) {
+        showToast('error', 'Please select a valid weight period');
+        setSubmitting(false);
+        return;
+      }
       await recordWeight(weightForm.goatId, {
         goatId: weightForm.goatId,
-        weightNumber: parseInt(weightForm.weightNumber) as any,
+        weightNumber,
         weight: parsedWeight,
         dueDate: new Date(),
         recordedDate: new Date(weightForm.recordedDate),
@@ -485,10 +511,16 @@ export const DashboardPage: React.FC = () => {
       showToast('success', 'Weight recorded successfully');
       setShowWeightModal(false);
       setWeightForm({ goatId: goatsList[0]?.id || '', weightNumber: goatsList[0] ? getNextAvailableMonth(goatsList[0].id, allWeights) : '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
+      setWeightGoatSearch('');
       setPrevWeight(null);
       loadData();
     } catch (error: any) {
-      showToast('error', 'Failed to record weight', error.message);
+      const msg = String(error?.message || error);
+      if (msg.toLowerCase().includes('check constraint') || msg.toLowerCase().includes('weight_number') && msg.toLowerCase().includes('constraint')) {
+        showToast('error', 'Extra weight blocked by database rule', 'Allow weight_number > 4 in the Supabase weights table (see plan SQL) to unlock extra logs.');
+      } else {
+        showToast('error', 'Failed to record weight', error.message);
+      }
     } finally { setSubmitting(false); }
   };
 
@@ -592,6 +624,33 @@ export const DashboardPage: React.FC = () => {
   const filteredWeightDue = weightDueGoats.filter((item) =>
     item.goat.earTagNumber.toLowerCase().includes(weightDueSearch.toLowerCase())
   );
+
+  // ── Weight-Record mode helpers (mirrors the Log Deworming + toggle logic) ──
+  // "Pending" = goats still missing at least one of the 4 mandatory monthly weights (1-4).
+  // "Fully recorded" = goats whose weight log already contains all 4 mandatory entries
+  //                    (shown only when the "+" extra-weight option is enabled).
+  const getRecordedWeightNumbers = (goatId: string) =>
+    allWeights
+      .filter((w) => w.goatId === goatId && w.isRecorded && w.weight > 0)
+      .map((w) => Number(w.weightNumber));
+
+  const isFullyRecorded = (goatId: string) => {
+    const recorded = getRecordedWeightNumbers(goatId);
+    return [1, 2, 3, 4].every((n) => recorded.includes(n));
+  };
+
+  const pendingWeightGoats = goatsList.filter((g) => !isFullyRecorded(g.id));
+  const fullyRecordedWeightGoats = goatsList.filter((g) => isFullyRecorded(g.id));
+
+  const weightGoatSelectionFullyRecorded = weightForm.goatId ? isFullyRecorded(weightForm.goatId) : false;
+
+  const toggleAdditionalWeight = () => {
+    const next = !isAdditionalWeight;
+    setIsAdditionalWeight(next);
+    // Reset the selection when switching modes so the dropdown list lines up with the mode
+    setWeightForm((prev) => ({ ...prev, goatId: '', weightNumber: '1' }));
+    setWeightGoatSearch('');
+  };
 
   return (
     <div className="space-y-6 relative">
@@ -778,7 +837,14 @@ export const DashboardPage: React.FC = () => {
             <CardContent>
               <form onSubmit={handleWeightSubmit} className="space-y-4">
                 <div>
-                  <Label htmlFor="weightGoatSearch">Search Goat (Ear Tag)</Label>
+                  <div className="mb-2">
+                    <Label htmlFor="weightGoatSearch">Search Goat (Ear Tag)</Label>
+                  </div>
+                  {isAdditionalWeight && (
+                    <div className="text-xs text-cyan-600 dark:text-cyan-400 mb-2 font-medium">
+                      Select from goats that have recorded all 4 mandatory weights
+                    </div>
+                  )}
                   <GoatSearchDropdown
                     refEl={weightRef}
                     searchVal={weightGoatSearch}
@@ -792,7 +858,17 @@ export const DashboardPage: React.FC = () => {
                     }}
                     placeholder="Type ear tag number..."
                     id="weightGoatSearch"
-                    goatsList={goatsList}
+                    goatsList={isAdditionalWeight ? fullyRecordedWeightGoats : pendingWeightGoats}
+                    onActionClick={toggleAdditionalWeight}
+                    actionIcon={
+                      <div className={`p-1 rounded-full flex items-center justify-center transition-colors ${
+                        isAdditionalWeight
+                          ? 'bg-cyan-500 text-white shadow-sm'
+                          : 'bg-cyan-50 text-cyan-600 hover:bg-cyan-100'
+                      }`}>
+                        <Plus className="h-4 w-4" />
+                      </div>
+                    }
                   />
                 </div>
 
@@ -809,7 +885,15 @@ export const DashboardPage: React.FC = () => {
                       .map(([v, l]) => (
                       <option key={v} value={v} className="bg-background text-foreground">{l}</option>
                     ))}
+                    {weightGoatSelectionFullyRecorded && (
+                      <option value="extra" className="bg-background text-foreground">Extra Weight (5+)</option>
+                    )}
                   </select>
+                  {weightGoatSelectionFullyRecorded && (
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      All 4 mandatory monthly weights are recorded — use the + icon to log additional weights (5th, 6th, ...).
+                    </p>
+                  )}
                 </div>
 
                 {prevWeight !== null && (

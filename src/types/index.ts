@@ -37,7 +37,7 @@ export interface Goat {
 export interface WeightRecord {
   id: string;
   goatId: string;
-  weightNumber: 0 | 1 | 2 | 3 | 4; // Weight 0-4
+  weightNumber: number; // 0 = purchase weight, 1-4 = mandatory monthly weights, 5+ = extra weight logs
   weight: number;
   dueDate: Date;
   recordedDate?: Date;

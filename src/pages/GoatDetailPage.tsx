@@ -127,6 +127,10 @@ export const GoatDetailPage: React.FC = () => {
     : null;
 
   const getWeightForNumber = (num: number) => recordedWeights.find((w) => w.weightNumber === num);
+  // Extra weight logs (5th, 6th, ...) recorded after the 4 mandatory monthly weights
+  const extraWeights = recordedWeights
+    .filter((w) => w.weightNumber > 4)
+    .sort((a, b) => a.weightNumber - b.weightNumber);
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       {/* Header */}
@@ -285,6 +289,34 @@ export const GoatDetailPage: React.FC = () => {
               </div>
             );
           })}
+          {extraWeights.length > 0 && (
+            <div className="pt-2 mt-2 border-t border-border/60 space-y-2">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Extra Weights</p>
+              {extraWeights.map((w) => (
+                <div key={w.id} className="flex items-center justify-between p-3 rounded-lg border bg-cyan-50/50 border-cyan-200 dark:bg-cyan-900/20 dark:border-cyan-700/40">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle className="h-4 w-4 text-cyan-500 shrink-0" />
+                    <span className="text-sm font-medium text-cyan-700 dark:text-cyan-300">
+                      Extra Weight {w.weightNumber}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {w.weightGain !== undefined && w.weightGain !== null && (
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        w.weightGain >= 0 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+                                          : 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300'
+                      }`}>
+                        {w.weightGain >= 0 ? '+' : ''}{w.weightGain} kg
+                      </span>
+                    )}
+                    <span className="text-sm font-semibold text-cyan-600 dark:text-cyan-400">
+                      {w.weight} kg
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
