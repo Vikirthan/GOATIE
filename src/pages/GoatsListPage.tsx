@@ -17,8 +17,9 @@ import {
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
 import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
-import { Plus, Search, Download, Upload, Trash2, Edit2, X, RefreshCw, Weight } from 'lucide-react';
+import { Search, Download, Upload, Trash2, Edit2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Label } from '@/components/ui/Label';
 import { exportGoatsToExcel, importFullExcelData } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
@@ -34,58 +35,61 @@ const formatEntryDate = (date: Date | string | undefined): string => {
   }
 };
 
-/** Parse a weight filter expression:
- *  "15+"  → { min: 15, max: Infinity }
- *  "15-"  → { min: 0, max: 15 }
- *  "10-20"→ { min: 10, max: 20 }
- *  "15"   → { min: 15, max: 15 }
- *  returns null when the expression is empty / invalid
- */
-function parseWeightFilter(expr: string): { min: number; max: number } | null {
-  const s = expr.trim();
-  if (!s) return null;
-  // "15+" pattern
-  const plusMatch = s.match(/^(\d+(?:\.\d+)?)\+$/);
-  if (plusMatch) return { min: parseFloat(plusMatch[1]), max: Infinity };
-  // "15-" pattern (below)
-  const minusMatch = s.match(/^(\d+(?:\.\d+)?)-$/);
-  if (minusMatch) return { min: 0, max: parseFloat(minusMatch[1]) };
-  // "10-20" range pattern
-  const rangeMatch = s.match(/^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/);
-  if (rangeMatch) {
-    const lo = parseFloat(rangeMatch[1]);
-    const hi = parseFloat(rangeMatch[2]);
-    return lo <= hi ? { min: lo, max: hi } : { min: hi, max: lo };
-  }
-  // exact number
-  const exact = parseFloat(s);
-  if (!isNaN(exact)) return { min: exact, max: exact };
-  return null;
+/** Picks which date to show per the active status filter:
+ *  "sold" -> sale date, "deceased" -> death date (falls back to updatedAt if not set),
+ *  "active"/"all" -> purchase date. */
+const getDisplayDate = (
+  goat: Goat,
+  currentFilter: 'all' | 'active' | 'sold' | 'deceased'
+): Date | string | undefined => {
+  if (currentFilter === 'sold') return goat.saleInfo?.saleDate ?? goat.purchaseDate;
+  if (currentFilter === 'deceased') return goat.deathDate ?? goat.updatedAt ?? goat.purchaseDate;
+  return goat.purchaseDate;
+};
+
+/** Builds a { min, max } range from separate min/max text-inputs.
+ *  Either side may be left blank to mean "no lower/upper bound".
+ *  Returns null when both sides are blank (no filter applied) or unparsable. */
+function rangeFromMinMax(
+  minStr: string,
+  maxStr: string,
+  unboundedMin: number = 0
+): { min: number; max: number } | null {
+  const minTrim = minStr.trim();
+  const maxTrim = maxStr.trim();
+  if (!minTrim && !maxTrim) return null;
+  const min = minTrim ? parseFloat(minTrim) : unboundedMin;
+  const max = maxTrim ? parseFloat(maxTrim) : Infinity;
+  if (isNaN(min) || isNaN(max)) return null;
+  return min <= max ? { min, max } : { min: max, max: min };
 }
 
-/** Parse a weight gain filter expression:
- *  "2+"  → { min: 2, max: Infinity }
- *  "2-"  → { min: -Infinity, max: 2 }
- *  "1-2" → { min: 1, max: 2 }
- *  "2"   → { min: 2, max: 2 }
- */
-function parseWeightGainFilter(expr: string): { min: number; max: number } | null {
-  const s = expr.replace(/\s+/g, '');
-  if (!s) return null;
-  const plusMatch = s.match(/^(\d+(?:\.\d+)?)\+$/);
-  if (plusMatch) return { min: parseFloat(plusMatch[1]), max: Infinity };
-  const minusMatch = s.match(/^(\d+(?:\.\d+)?)-$/);
-  if (minusMatch) return { min: -Infinity, max: parseFloat(minusMatch[1]) };
-  const rangeMatch = s.match(/^([\-]?\d+(?:\.\d+)?)-([\-]?\d+(?:\.\d+)?)$/);
-  if (rangeMatch) {
-    const lo = parseFloat(rangeMatch[1]);
-    const hi = parseFloat(rangeMatch[2]);
-    return lo <= hi ? { min: lo, max: hi } : { min: hi, max: lo };
-  }
-  const exact = parseFloat(s);
-  if (!isNaN(exact)) return { min: exact, max: exact };
-  return null;
-}
+const PAGE_SIZE = 25;
+
+const PaginationControls: React.FC<{ page: number; totalPages: number; onPageChange: (page: number) => void }> = ({
+  page, totalPages, onPageChange,
+}) => {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={() => onPageChange(Math.max(0, page - 1))}
+        disabled={page === 0}
+        className="px-2.5 py-1 rounded-md border border-border text-xs font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        Prev
+      </button>
+      <span className="text-xs text-muted-foreground tabular-nums">Page {page + 1} of {totalPages}</span>
+      <button
+        onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+        disabled={page >= totalPages - 1}
+        className="px-2.5 py-1 rounded-md border border-border text-xs font-medium hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        Next
+      </button>
+    </div>
+  );
+};
 
 export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
@@ -104,16 +108,21 @@ export const GoatsListPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('goats_searchTerm') || '');
   const [filter, setFilter] = useState<'all' | 'active' | 'sold' | 'deceased'>(() => (sessionStorage.getItem('goats_filter') as any) || 'all');
   const [variantFilter, setVariantFilter] = useState<string>(() => sessionStorage.getItem('goats_variantFilter') || 'all');
-  const [weightFilter, setWeightFilter] = useState(() => sessionStorage.getItem('goats_weightFilter') || '');
-  const [weightGainFilter, setWeightGainFilter] = useState(() => sessionStorage.getItem('goats_weightGainFilter') || '');
+  const [weightMin, setWeightMin] = useState(() => sessionStorage.getItem('goats_weightMin') || '');
+  const [weightMax, setWeightMax] = useState(() => sessionStorage.getItem('goats_weightMax') || '');
+  const [weightGainMin, setWeightGainMin] = useState(() => sessionStorage.getItem('goats_weightGainMin') || '');
+  const [weightGainMax, setWeightGainMax] = useState(() => sessionStorage.getItem('goats_weightGainMax') || '');
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     if (location.state?.usr?.status) {
       setFilter(location.state.usr.status);
       setSearchTerm('');
       setVariantFilter('all');
-      setWeightFilter('');
-      setWeightGainFilter('');
+      setWeightMin('');
+      setWeightMax('');
+      setWeightGainMin('');
+      setWeightGainMax('');
       // Clear location state to prevent locking the filter on refresh
       navigate(location.pathname, { replace: true, state: {} });
     }
@@ -123,16 +132,18 @@ export const GoatsListPage: React.FC = () => {
     sessionStorage.setItem('goats_searchTerm', searchTerm);
     sessionStorage.setItem('goats_filter', filter);
     sessionStorage.setItem('goats_variantFilter', variantFilter);
-    sessionStorage.setItem('goats_weightFilter', weightFilter);
-    sessionStorage.setItem('goats_weightGainFilter', weightGainFilter);
-  }, [searchTerm, filter, variantFilter, weightFilter, weightGainFilter]);
+    sessionStorage.setItem('goats_weightMin', weightMin);
+    sessionStorage.setItem('goats_weightMax', weightMax);
+    sessionStorage.setItem('goats_weightGainMin', weightGainMin);
+    sessionStorage.setItem('goats_weightGainMax', weightGainMax);
+  }, [searchTerm, filter, variantFilter, weightMin, weightMax, weightGainMin, weightGainMax]);
   const [dewormingRecords, setDewormingRecords] = useState<DewormingRecord[]>([]);
   const [vaccineRecords, setVaccineRecords] = useState<PPRVaccinationRecord[]>([]);
   const [weightRecords, setWeightRecords] = useState<WeightRecord[]>([]);
 
   const [syncing, setSyncing] = useState(false);
   const [editingGoat, setEditingGoat] = useState<Goat | null>(null);
-  const [editForm, setEditForm] = useState({ earTagNumber: '', purchaseWeight: '', purchasePrice: '', purchaseDate: '', status: 'active' as Goat['status'] });
+  const [editForm, setEditForm] = useState({ earTagNumber: '', purchaseWeight: '', purchasePrice: '', purchaseDate: '', status: 'active' as Goat['status'], deathDate: '' });
 
   // Map goatId → latest recorded weight value
   const latestWeightMap = React.useMemo(() => {
@@ -175,6 +186,7 @@ export const GoatsListPage: React.FC = () => {
       purchaseWeight: goat.purchaseWeight.toString(),
       purchasePrice: goat.purchasePrice.toString(),
       purchaseDate: new Date(goat.purchaseDate).toISOString().split('T')[0],
+      deathDate: goat.deathDate ? new Date(goat.deathDate).toISOString().split('T')[0] : '',
     });
   };
 
@@ -185,14 +197,15 @@ export const GoatsListPage: React.FC = () => {
       const weight = parseFloat(editForm.purchaseWeight);
       const price = parseFloat(editForm.purchasePrice);
       const purchasePricePerKg = weight > 0 ? Number((price / weight).toFixed(2)) : 0;
-      
-      const updates = {
+
+      const updates: Partial<Goat> = {
         earTagNumber: editForm.earTagNumber,
         status: editForm.status as Goat['status'],
         purchaseWeight: weight,
         purchasePrice: price,
         purchasePricePerKg: purchasePricePerKg,
         purchaseDate: new Date(editForm.purchaseDate),
+        deathDate: editForm.status === 'deceased' && editForm.deathDate ? new Date(editForm.deathDate) : undefined,
       };
 
       await updateGoat(editingGoat.id, updates);
@@ -203,6 +216,13 @@ export const GoatsListPage: React.FC = () => {
       showToast('error', 'Failed to update goat', err.message);
     }
   };
+
+  // IndexedDB only mirrors records created locally through this browser (see
+  // recordDeworming/recordVaccination/recordWeight) — it is not a full offline
+  // copy of the network data. Once the network/persisted-cache data has been
+  // applied, the local load below must never overwrite it with that partial
+  // snapshot, no matter which async read finishes last.
+  const networkDataAppliedRef = useRef(false);
 
   // 1. Initial Local Data Load (Offline First)
   useEffect(() => {
@@ -216,7 +236,8 @@ export const GoatsListPage: React.FC = () => {
         const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
         const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
         const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-        
+
+        if (networkDataAppliedRef.current) return;
         if (filteredLocal.length > 0) {
           setGoats(filteredLocal);
           setDewormingRecords(localDeworm);
@@ -233,9 +254,10 @@ export const GoatsListPage: React.FC = () => {
   // 2. Network Data Sync (React Query)
   useEffect(() => {
     if (queryLoading || !queryData || !user) return;
-    
+
     try {
       const { freshGoats, freshDeworm, freshVacc, freshWeights } = queryData;
+      networkDataAppliedRef.current = true;
       setGoats(freshGoats);
       setDewormingRecords(freshDeworm);
       setVaccineRecords(freshVacc);
@@ -263,7 +285,8 @@ export const GoatsListPage: React.FC = () => {
   };
 
   useEffect(() => {
-    let result = [...goats].sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime());
+    const sortDate = (g: Goat) => new Date(getDisplayDate(g, filter) ?? g.purchaseDate).getTime();
+    let result = [...goats].sort((a, b) => sortDate(b) - sortDate(a));
     if (filter !== 'all') result = result.filter((g) => g.status === filter);
     if (variantFilter !== 'all') result = result.filter((g) => String(g.variant || '').toUpperCase() === variantFilter);
     if (searchTerm) {
@@ -272,7 +295,7 @@ export const GoatsListPage: React.FC = () => {
         String(g.variant || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
-    const wf = parseWeightFilter(weightFilter);
+    const wf = rangeFromMinMax(weightMin, weightMax, 0);
     if (wf) {
       result = result.filter((g) => g.status !== 'sold');
       result = result.filter((g) => {
@@ -286,7 +309,7 @@ export const GoatsListPage: React.FC = () => {
         return weightA - weightB;
       });
     }
-    const wgf = parseWeightGainFilter(weightGainFilter);
+    const wgf = rangeFromMinMax(weightGainMin, weightGainMax, -Infinity);
     if (wgf) {
       result = result.filter((g) => g.status !== 'sold');
       result = result.filter((g) => {
@@ -319,7 +342,11 @@ export const GoatsListPage: React.FC = () => {
       });
     }
     setFilteredGoats(result);
-  }, [goats, searchTerm, filter, variantFilter, weightFilter, weightGainFilter, latestWeightMap, weightRecords]);
+    setPage(0);
+  }, [goats, searchTerm, filter, variantFilter, weightMin, weightMax, weightGainMin, weightGainMax, latestWeightMap, weightRecords]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredGoats.length / PAGE_SIZE));
+  const paginatedGoats = filteredGoats.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // ── Export: passes only the currently filtered goats so the workbook matches what's on screen ──
   const handleExportExcel = async () => {
@@ -542,15 +569,6 @@ export const GoatsListPage: React.FC = () => {
           >
             <Upload className="h-4 w-4" /> Import
           </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => navigate('/goats/register')}
-            className="flex items-center gap-2"
-            disabled={importing}
-          >
-            <Plus className="h-4 w-4" /> Register Goat
-          </Button>
         </div>
       </div>
 
@@ -574,117 +592,98 @@ export const GoatsListPage: React.FC = () => {
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-2 shrink-0">
-            {(['all', 'active', 'sold', 'deceased'] as const).map((f) => (
-              <Button
-                key={f}
-                variant={filter === f ? 'primary' : 'outline'}
-                size="sm"
-                onClick={() => setFilter(f)}
-                className="capitalize"
-              >
-                {f === 'all' ? 'All' : f === 'active' ? 'Active' : f === 'sold' ? 'Sold' : 'Dead'}
-              </Button>
-            ))}
-          </div>
-          <div className="flex gap-2 shrink-0 border-l border-border pl-2">
-            {(['all', 'SEMMARI', 'VELLADU'] as const).map((v) => (
-              <Button
-                key={v}
-                variant={variantFilter === v ? 'primary' : 'outline'}
-                size="sm"
-                onClick={() => setVariantFilter(v)}
-                className="capitalize"
-              >
-                {v === 'all' ? 'All Variants' : v}
-              </Button>
-            ))}
+          <div className="flex flex-row gap-2 shrink-0">
+            <Select
+              id="status-filter-select"
+              className="w-32 sm:w-40 shrink-0"
+              options={[
+                { value: 'all', label: 'All' },
+                { value: 'active', label: 'Active' },
+                { value: 'sold', label: 'Sold' },
+                { value: 'deceased', label: 'Dead' },
+              ]}
+              value={filter}
+              onChange={(v) => setFilter(v as 'all' | 'active' | 'sold' | 'deceased')}
+            />
+            <Select
+              id="variant-filter-select"
+              className="w-36 sm:w-44 shrink-0"
+              options={[
+                { value: 'all', label: 'All Variants' },
+                { value: 'SEMMARI', label: 'SEMMARI' },
+                { value: 'VELLADU', label: 'VELLADU' },
+              ]}
+              value={variantFilter}
+              onChange={setVariantFilter}
+            />
           </div>
         </div>
 
         {/* Weight filter row */}
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
           {/* Current Weight Filter */}
-          <div className="flex items-center gap-3">
-            <div className="relative w-56">
-              <Weight className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <Input
-                id="weight-filter-input"
-                placeholder="Weight: 15+  or  10-20  or  15-"
-                value={weightFilter}
-                onChange={(e) => setWeightFilter(e.target.value)}
-                className={`pl-10 pr-10 text-sm ${
-                  weightFilter && !parseWeightFilter(weightFilter)
-                    ? 'border-red-400 focus:ring-red-400'
-                    : weightFilter && parseWeightFilter(weightFilter)
-                    ? 'border-emerald-400'
-                    : ''
-                }`}
-              />
-              {weightFilter && (
-                <button
-                  onClick={() => setWeightFilter('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            {weightFilter && parseWeightFilter(weightFilter) && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-                {(() => {
-                  const wf = parseWeightFilter(weightFilter)!;
-                  if (wf.max === Infinity) return `≥ ${wf.min} kg`;
-                  if (wf.min === 0 && weightFilter.trim().endsWith('-')) return `≤ ${wf.max} kg`;
-                  if (wf.min === wf.max) return `= ${wf.min} kg`;
-                  return `${wf.min}–${wf.max} kg`;
-                })()}
-              </span>
-            )}
-            {weightFilter && !parseWeightFilter(weightFilter) && (
-              <span className="text-xs text-red-500 font-medium whitespace-nowrap">Invalid format</span>
+          <div className="flex items-center gap-2">
+            <Weight className="h-4 w-4 text-muted-foreground shrink-0" />
+            <Input
+              id="weight-min-input"
+              type="number"
+              inputMode="decimal"
+              placeholder="Min kg"
+              value={weightMin}
+              onChange={(e) => setWeightMin(e.target.value)}
+              className="w-24 text-sm"
+            />
+            <span className="text-muted-foreground text-sm">–</span>
+            <Input
+              id="weight-max-input"
+              type="number"
+              inputMode="decimal"
+              placeholder="Max kg"
+              value={weightMax}
+              onChange={(e) => setWeightMax(e.target.value)}
+              className="w-24 text-sm"
+            />
+            {(weightMin || weightMax) && (
+              <button
+                onClick={() => { setWeightMin(''); setWeightMax(''); }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear weight filter"
+              >
+                <X className="h-4 w-4" />
+              </button>
             )}
           </div>
 
           {/* Weight Gain Filter */}
-          <div className="flex items-center gap-3">
-            <div className="relative w-56">
-              <Weight className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-500 pointer-events-none" />
-              <Input
-                id="weight-gain-filter-input"
-                placeholder="Gain: 2+  or  -1-2  or  2-"
-                value={weightGainFilter}
-                onChange={(e) => setWeightGainFilter(e.target.value)}
-                className={`pl-10 pr-10 text-sm ${
-                  weightGainFilter && !parseWeightGainFilter(weightGainFilter)
-                    ? 'border-red-400 focus:ring-red-400'
-                    : weightGainFilter && parseWeightGainFilter(weightGainFilter)
-                    ? 'border-emerald-400'
-                    : ''
-                }`}
-              />
-              {weightGainFilter && (
-                <button
-                  onClick={() => setWeightGainFilter('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-            {weightGainFilter && parseWeightGainFilter(weightGainFilter) && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
-                {(() => {
-                  const wgf = parseWeightGainFilter(weightGainFilter)!;
-                  if (wgf.max === Infinity) return `Gain ≥ ${wgf.min} kg`;
-                  if (wgf.min === -Infinity) return `Gain ≤ ${wgf.max} kg`;
-                  if (wgf.min === wgf.max) return `Gain = ${wgf.min} kg`;
-                  return `Gain ${wgf.min}–${wgf.max} kg`;
-                })()}
-              </span>
-            )}
-            {weightGainFilter && !parseWeightGainFilter(weightGainFilter) && (
-              <span className="text-xs text-red-500 font-medium whitespace-nowrap">Invalid format</span>
+          <div className="flex items-center gap-2">
+            <Weight className="h-4 w-4 text-emerald-500 shrink-0" />
+            <Input
+              id="weight-gain-min-input"
+              type="number"
+              inputMode="decimal"
+              placeholder="Min gain"
+              value={weightGainMin}
+              onChange={(e) => setWeightGainMin(e.target.value)}
+              className="w-24 text-sm"
+            />
+            <span className="text-muted-foreground text-sm">–</span>
+            <Input
+              id="weight-gain-max-input"
+              type="number"
+              inputMode="decimal"
+              placeholder="Max gain"
+              value={weightGainMax}
+              onChange={(e) => setWeightGainMax(e.target.value)}
+              className="w-24 text-sm"
+            />
+            {(weightGainMin || weightGainMax) && (
+              <button
+                onClick={() => { setWeightGainMin(''); setWeightGainMax(''); }}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear weight gain filter"
+              >
+                <X className="h-4 w-4" />
+              </button>
             )}
           </div>
         </div>
@@ -699,12 +698,7 @@ export const GoatsListPage: React.FC = () => {
       {filteredGoats.length === 0 ? (
         <EmptyState
           title="No goats found"
-          description={searchTerm ? 'Try adjusting your search terms' : 'Register your first goat to get started'}
-          action={
-            <Button variant="primary" onClick={() => navigate('/goats/register')}>
-              Register First Goat
-            </Button>
-          }
+          description={searchTerm ? 'Try adjusting your search terms' : 'Register your first goat to get started from Quick Actions'}
         />
       ) : (
         <>
@@ -727,7 +721,7 @@ export const GoatsListPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredGoats.map((goat, idx) => {
+                  {paginatedGoats.map((goat, idx) => {
                     const vaccineStatus = getGoatVaccineStatus(goat.id);
                     const dewormStatus = getGoatDewormingStatus(goat.id);
                     return (
@@ -736,7 +730,7 @@ export const GoatsListPage: React.FC = () => {
                         onClick={() => navigate(`/goats/${goat.id}`)}
                         className={`cursor-pointer transition-colors duration-150 hover:bg-accent/50 ${idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/20'}`}
                       >
-                        <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground tabular-nums">{idx + 1}</td>
+                        <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground tabular-nums">{page * PAGE_SIZE + idx + 1}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span className={`font-semibold ${goat.status === 'sold' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
                             {goat.earTagNumber}
@@ -786,7 +780,7 @@ export const GoatsListPage: React.FC = () => {
                             {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
                           </span>
                           <span className="block text-[10px] text-muted-foreground mt-1">
-                            {formatEntryDate(goat.purchaseDate)}
+                            {formatEntryDate(getDisplayDate(goat, filter))}
                           </span>
                         </td>
                         <td className="px-4 py-3.5 text-center whitespace-nowrap">
@@ -811,14 +805,15 @@ export const GoatsListPage: React.FC = () => {
                 </tbody>
               </table>
             </div>
-            <div className="border-t border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground">
-              Showing {filteredGoats.length} of {goats.length} goats
+            <div className="border-t border-border bg-muted/30 px-4 py-2.5 flex items-center justify-between text-xs text-muted-foreground">
+              <span>Showing {paginatedGoats.length} of {filteredGoats.length} goats</span>
+              <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
             </div>
           </div>
 
           {/* ── Mobile Cards ── */}
           <div className="md:hidden space-y-3">
-            {filteredGoats.map((goat, idx) => {
+            {paginatedGoats.map((goat, idx) => {
               const vaccineStatus = getGoatVaccineStatus(goat.id);
               const dewormStatus = getGoatDewormingStatus(goat.id);
               return (
@@ -833,7 +828,7 @@ export const GoatsListPage: React.FC = () => {
                   <div className="p-4 pt-5">
                     <div className="flex items-center justify-between gap-3 mb-3">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="shrink-0 text-xs font-semibold text-muted-foreground tabular-nums">{idx + 1}.</span>
+                        <span className="shrink-0 text-xs font-semibold text-muted-foreground tabular-nums">{page * PAGE_SIZE + idx + 1}.</span>
                         <h3 className={`text-base font-bold truncate ${goat.status === 'sold' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
                           {goat.earTagNumber}
                         </h3>
@@ -847,7 +842,7 @@ export const GoatsListPage: React.FC = () => {
                           {goat.status}
                         </span>
                         <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {formatEntryDate(goat.purchaseDate)}
+                          {formatEntryDate(getDisplayDate(goat, filter))}
                         </span>
                       </div>
                       <div className="flex gap-2">
@@ -912,9 +907,12 @@ export const GoatsListPage: React.FC = () => {
                 </div>
               );
             })}
-            <p className="text-center text-xs text-muted-foreground pt-1 pb-2">
-              Showing {filteredGoats.length} of {goats.length} goats
-            </p>
+            <div className="flex flex-col items-center gap-2 pt-1 pb-2">
+              <p className="text-center text-xs text-muted-foreground">
+                Showing {paginatedGoats.length} of {filteredGoats.length} goats
+              </p>
+              <PaginationControls page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
           </div>
         </>
       )}
@@ -953,6 +951,18 @@ export const GoatsListPage: React.FC = () => {
                   <option value="deceased" className="bg-background text-foreground">Dead (Deceased)</option>
                 </select>
               </div>
+              {editForm.status === 'deceased' && (
+                <div>
+                  <Label htmlFor="editDeathDate">Death Date</Label>
+                  <Input
+                    id="editDeathDate"
+                    type="date"
+                    value={editForm.deathDate}
+                    onChange={(e) => setEditForm({ ...editForm, deathDate: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
               <div>
                 <Label htmlFor="editWeight">Purchase Weight (kg)</Label>
                 <Input

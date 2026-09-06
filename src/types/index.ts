@@ -28,6 +28,7 @@ export interface Goat {
   qrCode?: string;
   barcode?: string;
   status: 'active' | 'sold' | 'deceased';
+  deathDate?: Date;
   createdAt: Date;
   updatedAt: Date;
   saleInfo?: SaleInfo;
