@@ -1,17 +1,3 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  getDocs,
-  getDoc,
-  query,
-  where,
-  orderBy,
-  Query,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
 import { generateId } from '@/utils/helpers';
 import * as indexedDB from '@/lib/indexeddb';
@@ -21,13 +7,6 @@ import * as supabaseService from './supabaseService';
 
 export const isSupabaseEnabled = (): boolean => {
   return !!import.meta.env.VITE_SUPABASE_URL;
-};
-
-// Determine if we should route to Sheets/IndexedDB instead of Firestore
-const useSheetsOrLocal = (): boolean => {
-  const cachedDemoUser = localStorage.getItem('goatie_logged_in_user');
-  const isDemo = cachedDemoUser !== null;
-  return isDemo || !db || sheetsService.isSheetsConfigured();
 };
 
 // ─── Goat Services ───────────────────────────────────────────────────────────
@@ -86,35 +65,25 @@ export async function createGoat(
     });
   }
 
-  if (useSheetsOrLocal()) {
-    // Write locally to IndexedDB immediately
-    await indexedDB.addItem('goats', goat);
-    await indexedDB.addItem('weights', w0);
-    for (const w of placeholders) {
-      await indexedDB.addItem('weights', w);
-    }
-
-    // Sync with Google Sheets — await to ensure data is saved before returning
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeGoatSheet(goat);
-        await sheetsService.writeWeightSheet(w0);
-        for (const w of placeholders) {
-          await sheetsService.writeWeightSheet(w);
-        }
-      } catch (err) {
-        console.error('Error syncing createGoat to Google Sheets:', err);
-        showToast('warning', 'Google Sheets Sync Warning', 'Goat is saved locally, but failed to sync to Google Sheets. Ensure your Web App has permissions set to "Anyone".');
-      }
-    }
-    return id;
+  // Write locally to IndexedDB immediately
+  await indexedDB.addItem('goats', goat);
+  await indexedDB.addItem('weights', w0);
+  for (const w of placeholders) {
+    await indexedDB.addItem('weights', w);
   }
 
-  // Firestore fallback
-  await setDoc(doc(db, 'goats', id), goat);
-  await setDoc(doc(db, 'weights', w0.id), w0);
-  for (const w of placeholders) {
-    await setDoc(doc(db, 'weights', w.id), w);
+  // Sync with Google Sheets — await to ensure data is saved before returning
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      await sheetsService.writeGoatSheet(goat);
+      await sheetsService.writeWeightSheet(w0);
+      for (const w of placeholders) {
+        await sheetsService.writeWeightSheet(w);
+      }
+    } catch (err) {
+      console.error('Error syncing createGoat to Google Sheets:', err);
+      showToast('warning', 'Google Sheets Sync Warning', 'Goat is saved locally, but failed to sync to Google Sheets. Ensure your Web App has permissions set to "Anyone".');
+    }
   }
   return id;
 }
@@ -123,287 +92,236 @@ export async function updateGoat(goatId: string, data: Partial<Goat>): Promise<v
   if (isSupabaseEnabled()) {
     return supabaseService.updateGoat(goatId, data);
   }
-  if (useSheetsOrLocal()) {
-    const existing = await indexedDB.getItem<Goat>('goats', goatId);
-    if (existing) {
-      const updatedGoat = {
-        ...existing,
-        ...data,
-        updatedAt: new Date(),
-      };
-      await indexedDB.updateItem('goats', updatedGoat);
+  const existing = await indexedDB.getItem<Goat>('goats', goatId);
+  if (existing) {
+    const updatedGoat = {
+      ...existing,
+      ...data,
+      updatedAt: new Date(),
+    };
+    await indexedDB.updateItem('goats', updatedGoat);
 
-      if (sheetsService.isSheetsConfigured()) {
-        try {
-          await sheetsService.updateGoatSheet(updatedGoat);
-        } catch (err) {
-          console.error('Error syncing updateGoat to Google Sheets:', err);
-        }
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        await sheetsService.updateGoatSheet(updatedGoat);
+      } catch (err) {
+        console.error('Error syncing updateGoat to Google Sheets:', err);
       }
     }
-    return;
   }
-
-  await updateDoc(doc(db, 'goats', goatId), {
-    ...data,
-    updatedAt: new Date(),
-  });
 }
 
 export async function getGoat(goatId: string): Promise<Goat | null> {
   if (isSupabaseEnabled()) {
     return supabaseService.getGoat(goatId);
   }
-  if (useSheetsOrLocal()) {
-    // Fetch fresh from Sheets if configured
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const goats = await sheetsService.getGoatsSheet();
-        const fresh = goats.find((g) => g.id === goatId);
-        if (fresh) {
-          await indexedDB.updateItem('goats', fresh);
-          return fresh;
-        }
-      } catch (err) {
-        console.error('Error fetching goat from Google Sheets:', err);
+  // Fetch fresh from Sheets if configured
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      const goats = await sheetsService.getGoatsSheet();
+      const fresh = goats.find((g) => g.id === goatId);
+      if (fresh) {
+        await indexedDB.updateItem('goats', fresh);
+        return fresh;
       }
+    } catch (err) {
+      console.error('Error fetching goat from Google Sheets:', err);
     }
-    // Fallback to IndexedDB
-    return await indexedDB.getItem<Goat>('goats', goatId) || null;
   }
-
-  const snapshot = await getDoc(doc(db, 'goats', goatId));
-  return snapshot.exists() ? (snapshot.data() as Goat) : null;
+  // Fallback to IndexedDB
+  return await indexedDB.getItem<Goat>('goats', goatId) || null;
 }
 
 export async function getGoatByEarTag(farmerId: string, earTagNumber: string): Promise<Goat | null> {
   if (isSupabaseEnabled()) {
     return supabaseService.getGoatByEarTag(farmerId, earTagNumber);
   }
-  if (useSheetsOrLocal()) {
-    // Fetch from Sheets for accuracy
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const freshGoats = await sheetsService.getGoatsSheet();
-        // Only block if there's an ACTIVE goat with this tag (sold ones can be reused)
-        const match = freshGoats.find(
-          (g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active'
-        ) || null;
-        // Update local cache
-        for (const g of freshGoats) {
-          await indexedDB.updateItem('goats', g);
-        }
-        return match;
-      } catch (err) {
-        console.error('Error fetching goats for ear tag check:', err);
+  // Fetch from Sheets for accuracy
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      const freshGoats = await sheetsService.getGoatsSheet();
+      // Only block if there's an ACTIVE goat with this tag (sold ones can be reused)
+      const match = freshGoats.find(
+        (g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active'
+      ) || null;
+      // Update local cache
+      for (const g of freshGoats) {
+        await indexedDB.updateItem('goats', g);
       }
+      return match;
+    } catch (err) {
+      console.error('Error fetching goats for ear tag check:', err);
     }
-    const goats = await indexedDB.getAllItems<Goat>('goats');
-    // Only block reuse if the goat is active
-    return goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active') || null;
   }
-
-  const q = query(
-    collection(db, 'goats'),
-    where('farmerId', '==', farmerId),
-    where('earTagNumber', '==', earTagNumber),
-    where('status', '==', 'active')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.empty ? null : (snapshot.docs[0].data() as Goat);
+  const goats = await indexedDB.getAllItems<Goat>('goats');
+  // Only block reuse if the goat is active
+  return goats.find((g) => g.farmerId === farmerId && g.earTagNumber === earTagNumber && g.status === 'active') || null;
 }
 
 export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
   if (isSupabaseEnabled()) {
     return supabaseService.getFarmerGoats(farmerId, status);
   }
-  if (useSheetsOrLocal()) {
-    // Fetch fresh from Sheets when configured
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const freshGoats = await sheetsService.getGoatsSheet();
-        const localGoats = await indexedDB.getAllItems<Goat>('goats');
-        
-        // Find goats created locally while Sheets was unconfigured/offline
-        const unsyncedGoats = localGoats.filter(
-          (lg) => lg.farmerId === farmerId && !freshGoats.some((fg) => fg.id === lg.id)
-        );
+  // Fetch fresh from Sheets when configured
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      const freshGoats = await sheetsService.getGoatsSheet();
+      const localGoats = await indexedDB.getAllItems<Goat>('goats');
 
-        if (unsyncedGoats.length > 0) {
-          for (const ug of unsyncedGoats) {
-            try {
-              // 1. Sync goat
-              await sheetsService.writeGoatSheet(ug);
+      // Find goats created locally while Sheets was unconfigured/offline
+      const unsyncedGoats = localGoats.filter(
+        (lg) => lg.farmerId === farmerId && !freshGoats.some((fg) => fg.id === lg.id)
+      );
 
-              // 2. Sync weights
-              const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-              const ugWeights = localWeights.filter((w) => w.goatId === ug.id);
-              for (const uw of ugWeights) {
-                await sheetsService.writeWeightSheet(uw);
-              }
+      if (unsyncedGoats.length > 0) {
+        for (const ug of unsyncedGoats) {
+          try {
+            // 1. Sync goat
+            await sheetsService.writeGoatSheet(ug);
 
-              // 3. Sync dewormings
-              const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
-              const ugDewormings = localDewormings.filter((d) => d.goatId === ug.id);
-              for (const ud of ugDewormings) {
-                await sheetsService.writeDewormingSheet(ud);
-              }
-
-              // 4. Sync vaccinations
-              const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-              const ugVaccinations = localVaccinations.filter((v) => v.goatId === ug.id);
-              for (const uv of ugVaccinations) {
-                await sheetsService.writeVaccinationSheet(uv);
-              }
-
-              // 5. Sync sale if sold
-              if (ug.status === 'sold' && ug.saleInfo) {
-                await sheetsService.writeSaleSheet(ug.saleInfo);
-              }
-
-              freshGoats.push(ug);
-            } catch (syncErr) {
-              console.error(`Failed to sync local goat ${ug.earTagNumber} to sheets:`, syncErr);
+            // 2. Sync weights
+            const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+            const ugWeights = localWeights.filter((w) => w.goatId === ug.id);
+            for (const uw of ugWeights) {
+              await sheetsService.writeWeightSheet(uw);
             }
+
+            // 3. Sync dewormings
+            const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
+            const ugDewormings = localDewormings.filter((d) => d.goatId === ug.id);
+            for (const ud of ugDewormings) {
+              await sheetsService.writeDewormingSheet(ud);
+            }
+
+            // 4. Sync vaccinations
+            const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+            const ugVaccinations = localVaccinations.filter((v) => v.goatId === ug.id);
+            for (const uv of ugVaccinations) {
+              await sheetsService.writeVaccinationSheet(uv);
+            }
+
+            // 5. Sync sale if sold
+            if (ug.status === 'sold' && ug.saleInfo) {
+              await sheetsService.writeSaleSheet(ug.saleInfo);
+            }
+
+            freshGoats.push(ug);
+          } catch (syncErr) {
+            console.error(`Failed to sync local goat ${ug.earTagNumber} to sheets:`, syncErr);
           }
         }
-
-        // Also check for any unsynced weights/vaccinations/dewormings on existing goats
-        try {
-          const freshWeights = await sheetsService.getWeightsSheet();
-          const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-          
-          // Sync UP
-          const unsyncedWeights = localWeights.filter(
-            (lw) => lw.isRecorded && 
-                    freshGoats.some((g) => g.id === lw.goatId && g.farmerId === farmerId) && 
-                    !freshWeights.some((fw) => fw.id === lw.id)
-          );
-          for (const uw of unsyncedWeights) {
-            await sheetsService.writeWeightSheet(uw).catch(() => {});
-          }
-
-          // Sync DOWN
-          for (const fw of freshWeights) {
-            const lw = localWeights.find((l) => l.id === fw.id);
-            if (!lw || new Date(fw.updatedAt).getTime() >= new Date(lw.updatedAt).getTime()) {
-              await indexedDB.updateItem('weights', fw);
-            }
-          }
-
-          const freshDewormings = await sheetsService.getDewormingSheet();
-          const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
-          
-          // Sync UP
-          const unsyncedDewormings = localDewormings.filter(
-            (ld) => freshGoats.some((g) => g.id === ld.goatId && g.farmerId === farmerId) && 
-                    !freshDewormings.some((fd) => fd.id === ld.id)
-          );
-          for (const ud of unsyncedDewormings) {
-            await sheetsService.writeDewormingSheet(ud).catch(() => {});
-          }
-
-          // Sync DOWN
-          for (const fd of freshDewormings) {
-            const ld = localDewormings.find((l) => l.id === fd.id);
-            if (!ld || new Date(fd.updatedAt).getTime() >= new Date(ld.updatedAt).getTime()) {
-              await indexedDB.updateItem('deworming', fd);
-            }
-          }
-
-          const freshVaccinations = await sheetsService.getVaccinationSheet();
-          const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-          
-          // Sync UP
-          const unsyncedVaccinations = localVaccinations.filter(
-            (lv) => freshGoats.some((g) => g.id === lv.goatId && g.farmerId === farmerId) && 
-                    !freshVaccinations.some((fv) => fv.id === lv.id)
-          );
-          for (const uv of unsyncedVaccinations) {
-            await sheetsService.writeVaccinationSheet(uv).catch(() => {});
-          }
-
-          // Sync DOWN
-          for (const fv of freshVaccinations) {
-            const lv = localVaccinations.find((l) => l.id === fv.id);
-            if (!lv || new Date(fv.updatedAt).getTime() >= new Date(lv.updatedAt).getTime()) {
-              await indexedDB.updateItem('vaccination', fv);
-            }
-          }
-
-          const freshSales = await sheetsService.getSalesSheet();
-          const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
-          // Sync DOWN sales (UP is handled when goat status is set to sold in earlier logic)
-          for (const fs of freshSales) {
-            const ls = localSales.find((l) => l.id === fs.id);
-            if (!ls || new Date(fs.updatedAt).getTime() >= new Date(ls.updatedAt).getTime()) {
-              await indexedDB.updateItem('sales', fs);
-            }
-          }
-        } catch (subSyncErr) {
-          console.error('Error syncing individual records:', subSyncErr);
-        }
-
-        // Update IndexedDB with fresh data
-        const otherFarmers = localGoats.filter((g) => g.farmerId !== farmerId);
-        await indexedDB.clearStore('goats');
-        for (const g of [...otherFarmers, ...freshGoats.filter((g) => g.farmerId === farmerId)]) {
-          await indexedDB.updateItem('goats', g);
-        }
-        let filtered = freshGoats.filter((g) => g.farmerId === farmerId);
-        if (status) filtered = filtered.filter((g) => g.status === status);
-        return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      } catch (err) {
-        console.error('Error fetching farmer goats from Sheets:', err);
-        showToast('error', 'Google Sheets Fetch Failed', 'Could not read from Google Sheets. Ensure your Web App is deployed with public access (Anyone). Falling back to local offline cache.');
       }
+
+      // Also check for any unsynced weights/vaccinations/dewormings on existing goats
+      try {
+        const freshWeights = await sheetsService.getWeightsSheet();
+        const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+
+        // Sync UP
+        const unsyncedWeights = localWeights.filter(
+          (lw) => lw.isRecorded &&
+                  freshGoats.some((g) => g.id === lw.goatId && g.farmerId === farmerId) &&
+                  !freshWeights.some((fw) => fw.id === lw.id)
+        );
+        for (const uw of unsyncedWeights) {
+          await sheetsService.writeWeightSheet(uw).catch(() => {});
+        }
+
+        // Sync DOWN
+        for (const fw of freshWeights) {
+          const lw = localWeights.find((l) => l.id === fw.id);
+          if (!lw || new Date(fw.updatedAt).getTime() >= new Date(lw.updatedAt).getTime()) {
+            await indexedDB.updateItem('weights', fw);
+          }
+        }
+
+        const freshDewormings = await sheetsService.getDewormingSheet();
+        const localDewormings = await indexedDB.getAllItems<DewormingRecord>('deworming');
+
+        // Sync UP
+        const unsyncedDewormings = localDewormings.filter(
+          (ld) => freshGoats.some((g) => g.id === ld.goatId && g.farmerId === farmerId) &&
+                  !freshDewormings.some((fd) => fd.id === ld.id)
+        );
+        for (const ud of unsyncedDewormings) {
+          await sheetsService.writeDewormingSheet(ud).catch(() => {});
+        }
+
+        // Sync DOWN
+        for (const fd of freshDewormings) {
+          const ld = localDewormings.find((l) => l.id === fd.id);
+          if (!ld || new Date(fd.updatedAt).getTime() >= new Date(ld.updatedAt).getTime()) {
+            await indexedDB.updateItem('deworming', fd);
+          }
+        }
+
+        const freshVaccinations = await sheetsService.getVaccinationSheet();
+        const localVaccinations = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+
+        // Sync UP
+        const unsyncedVaccinations = localVaccinations.filter(
+          (lv) => freshGoats.some((g) => g.id === lv.goatId && g.farmerId === farmerId) &&
+                  !freshVaccinations.some((fv) => fv.id === lv.id)
+        );
+        for (const uv of unsyncedVaccinations) {
+          await sheetsService.writeVaccinationSheet(uv).catch(() => {});
+        }
+
+        // Sync DOWN
+        for (const fv of freshVaccinations) {
+          const lv = localVaccinations.find((l) => l.id === fv.id);
+          if (!lv || new Date(fv.updatedAt).getTime() >= new Date(lv.updatedAt).getTime()) {
+            await indexedDB.updateItem('vaccination', fv);
+          }
+        }
+
+        const freshSales = await sheetsService.getSalesSheet();
+        const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
+        // Sync DOWN sales (UP is handled when goat status is set to sold in earlier logic)
+        for (const fs of freshSales) {
+          const ls = localSales.find((l) => l.id === fs.id);
+          if (!ls || new Date(fs.updatedAt).getTime() >= new Date(ls.updatedAt).getTime()) {
+            await indexedDB.updateItem('sales', fs);
+          }
+        }
+      } catch (subSyncErr) {
+        console.error('Error syncing individual records:', subSyncErr);
+      }
+
+      // Update IndexedDB with fresh data
+      const otherFarmers = localGoats.filter((g) => g.farmerId !== farmerId);
+      await indexedDB.clearStore('goats');
+      for (const g of [...otherFarmers, ...freshGoats.filter((g) => g.farmerId === farmerId)]) {
+        await indexedDB.updateItem('goats', g);
+      }
+      let filtered = freshGoats.filter((g) => g.farmerId === farmerId);
+      if (status) filtered = filtered.filter((g) => g.status === status);
+      return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } catch (err) {
+      console.error('Error fetching farmer goats from Sheets:', err);
+      showToast('error', 'Google Sheets Fetch Failed', 'Could not read from Google Sheets. Ensure your Web App is deployed with public access (Anyone). Falling back to local offline cache.');
     }
-
-    // Fallback to IndexedDB
-    const localGoats = await indexedDB.getAllItems<Goat>('goats');
-    let filtered = localGoats.filter((g) => g.farmerId === farmerId);
-    if (status) filtered = filtered.filter((g) => g.status === status);
-    return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  let q: Query;
-  if (status) {
-    q = query(
-      collection(db, 'goats'),
-      where('farmerId', '==', farmerId),
-      where('status', '==', status),
-      orderBy('createdAt', 'desc')
-    );
-  } else {
-    q = query(
-      collection(db, 'goats'),
-      where('farmerId', '==', farmerId),
-      orderBy('createdAt', 'desc')
-    );
-  }
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => doc.data() as Goat);
+  // Fallback to IndexedDB
+  const localGoats = await indexedDB.getAllItems<Goat>('goats');
+  let filtered = localGoats.filter((g) => g.farmerId === farmerId);
+  if (status) filtered = filtered.filter((g) => g.status === status);
+  return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
   if (isSupabaseEnabled()) {
     return supabaseService.deleteGoat(goatId);
   }
-  if (useSheetsOrLocal()) {
-    await indexedDB.deleteItem('goats', goatId);
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.deleteGoatSheet(goatId);
-      } catch (err) {
-        console.error('Error deleting goat from Google Sheets:', err);
-      }
+  await indexedDB.deleteItem('goats', goatId);
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      await sheetsService.deleteGoatSheet(goatId);
+    } catch (err) {
+      console.error('Error deleting goat from Google Sheets:', err);
     }
-    return;
   }
-
-  await deleteDoc(doc(db, 'goats', goatId));
 }
 
 // ─── Weight Record Services ───────────────────────────────────────────────────
@@ -417,139 +335,81 @@ export async function recordWeight(
   }
   const now = new Date();
 
-  if (useSheetsOrLocal()) {
-    // Fetch previous recorded weight to compute gain
-    const allWeights = sheetsService.isSheetsConfigured()
-      ? await sheetsService.getWeightsSheet().catch(() => indexedDB.getAllItems<WeightRecord>('weights'))
-      : await indexedDB.getAllItems<WeightRecord>('weights');
+  // Fetch previous recorded weight to compute gain
+  const allWeights = sheetsService.isSheetsConfigured()
+    ? await sheetsService.getWeightsSheet().catch(() => indexedDB.getAllItems<WeightRecord>('weights'))
+    : await indexedDB.getAllItems<WeightRecord>('weights');
 
-    const goatWeights = (allWeights as WeightRecord[])
-      .filter((w) => w.goatId === goatId && w.isRecorded && w.weight > 0)
-      .sort((a, b) => a.weightNumber - b.weightNumber);
+  const goatWeights = (allWeights as WeightRecord[])
+    .filter((w) => w.goatId === goatId && w.isRecorded && w.weight > 0)
+    .sort((a, b) => a.weightNumber - b.weightNumber);
 
-    // Previous weight is the last recorded one before this weight number
-    const prevWeight = goatWeights
-      .filter((w) => w.weightNumber < weightData.weightNumber)
-      .pop();
+  // Previous weight is the last recorded one before this weight number
+  const prevWeight = goatWeights
+    .filter((w) => w.weightNumber < weightData.weightNumber)
+    .pop();
 
-    const weightGain = prevWeight ? parseFloat((weightData.weight - prevWeight.weight).toFixed(2)) : undefined;
+  const weightGain = prevWeight ? parseFloat((weightData.weight - prevWeight.weight).toFixed(2)) : undefined;
 
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    const existing = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightData.weightNumber);
+  const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+  const existing = localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightData.weightNumber);
 
-    if (existing) {
-      const updated: WeightRecord = {
-        ...existing,
-        weight: weightData.weight,
-        recordedDate: weightData.recordedDate || now,
-        remarks: weightData.remarks,
-        isRecorded: true,
-        weightGain,
-        updatedAt: now,
-      };
-      await indexedDB.updateItem('weights', updated);
-      if (sheetsService.isSheetsConfigured()) {
-        try {
-          await sheetsService.updateWeightSheet(updated);
-        } catch (err) {
-          console.error('Error updating weight in Google Sheets:', err);
-        }
-      }
-      return existing.id;
-    } else {
-      const id = generateId();
-      const record: WeightRecord = {
-        ...weightData,
-        id,
-        goatId,
-        isRecorded: true,
-        weightGain,
-        createdAt: now,
-        updatedAt: now,
-      };
-      await indexedDB.addItem('weights', record);
-      if (sheetsService.isSheetsConfigured()) {
-        try {
-          await sheetsService.writeWeightSheet(record);
-        } catch (err) {
-          console.error('Error syncing weight to Google Sheets:', err);
-        }
-      }
-      return id;
-    }
-  }
-
-  // Firestore fallback
-  const q = query(
-    collection(db, 'weights'),
-    where('goatId', '==', goatId),
-    where('weightNumber', '==', weightData.weightNumber)
-  );
-  const snapshot = await getDocs(q);
-  if (!snapshot.empty) {
-    const docRef = doc(db, 'weights', snapshot.docs[0].id);
-    const existingData = snapshot.docs[0].data() as WeightRecord;
-    const updated = {
-      ...existingData,
+  if (existing) {
+    const updated: WeightRecord = {
+      ...existing,
       weight: weightData.weight,
       recordedDate: weightData.recordedDate || now,
       remarks: weightData.remarks,
       isRecorded: true,
+      weightGain,
       updatedAt: now,
     };
-    await setDoc(docRef, updated);
-    return snapshot.docs[0].id;
+    await indexedDB.updateItem('weights', updated);
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        await sheetsService.updateWeightSheet(updated);
+      } catch (err) {
+        console.error('Error updating weight in Google Sheets:', err);
+      }
+    }
+    return existing.id;
+  } else {
+    const id = generateId();
+    const record: WeightRecord = {
+      ...weightData,
+      id,
+      goatId,
+      isRecorded: true,
+      weightGain,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await indexedDB.addItem('weights', record);
+    if (sheetsService.isSheetsConfigured()) {
+      try {
+        await sheetsService.writeWeightSheet(record);
+      } catch (err) {
+        console.error('Error syncing weight to Google Sheets:', err);
+      }
+    }
+    return id;
   }
-
-  const id = generateId();
-  const record: WeightRecord = {
-    ...weightData,
-    id,
-    goatId,
-    isRecorded: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-  await setDoc(doc(db, 'weights', id), record);
-  return id;
 }
 
 export async function getGoatWeights(goatId: string): Promise<WeightRecord[]> {
   if (isSupabaseEnabled()) {
     return supabaseService.getGoatWeights(goatId);
   }
-  if (useSheetsOrLocal()) {
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    return localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
-  }
-
-  const q = query(
-    collection(db, 'weights'),
-    where('goatId', '==', goatId),
-    orderBy('weightNumber', 'asc')
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => doc.data() as WeightRecord);
+  const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+  return localWeights.filter((w) => w.goatId === goatId).sort((a, b) => a.weightNumber - b.weightNumber);
 }
 
 export async function getWeightRecord(goatId: string, weightNumber: number): Promise<WeightRecord | null> {
   if (isSupabaseEnabled()) {
     return supabaseService.getWeightRecord(goatId, weightNumber);
   }
-  if (useSheetsOrLocal()) {
-    const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-    return localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
-  }
-
-  const q = query(
-    collection(db, 'weights'),
-    where('goatId', '==', goatId),
-    where('weightNumber', '==', weightNumber)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.empty ? null : (snapshot.docs[0].data() as WeightRecord);
+  const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
+  return localWeights.find((w) => w.goatId === goatId && w.weightNumber === weightNumber) || null;
 }
 
 // ─── Deworming Services ───────────────────────────────────────────────────────
@@ -578,19 +438,14 @@ export async function recordDeworming(
     updatedAt: now,
   };
 
-  if (useSheetsOrLocal()) {
-    await indexedDB.addItem('deworming', record);
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeDewormingSheet(record);
-      } catch (err) {
-        console.error('Error syncing deworming to Google Sheets:', err);
-      }
+  await indexedDB.addItem('deworming', record);
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      await sheetsService.writeDewormingSheet(record);
+    } catch (err) {
+      console.error('Error syncing deworming to Google Sheets:', err);
     }
-    return id;
   }
-
-  await setDoc(doc(db, 'deworming', id), record);
   return id;
 }
 
@@ -598,13 +453,8 @@ export async function getAllDewormingForGoat(goatId: string): Promise<DewormingR
   if (isSupabaseEnabled()) {
     return supabaseService.getAllDewormingForGoat(goatId);
   }
-  if (useSheetsOrLocal()) {
-    const local = await indexedDB.getAllItems<DewormingRecord>('deworming');
-    return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
-  }
-  const q = query(collection(db, 'deworming'), where('goatId', '==', goatId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => doc.data() as DewormingRecord);
+  const local = await indexedDB.getAllItems<DewormingRecord>('deworming');
+  return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
 }
 
 export async function getGoatDeworming(goatId: string): Promise<DewormingRecord | null> {
@@ -641,19 +491,14 @@ export async function recordVaccination(
     updatedAt: now,
   };
 
-  if (useSheetsOrLocal()) {
-    await indexedDB.addItem('vaccination', record);
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeVaccinationSheet(record);
-      } catch (err) {
-        console.error('Error syncing vaccination to Google Sheets:', err);
-      }
+  await indexedDB.addItem('vaccination', record);
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      await sheetsService.writeVaccinationSheet(record);
+    } catch (err) {
+      console.error('Error syncing vaccination to Google Sheets:', err);
     }
-    return id;
   }
-
-  await setDoc(doc(db, 'vaccination', id), record);
   return id;
 }
 
@@ -661,13 +506,8 @@ export async function getAllVaccinationsForGoat(goatId: string): Promise<PPRVacc
   if (isSupabaseEnabled()) {
     return supabaseService.getAllVaccinationsForGoat(goatId);
   }
-  if (useSheetsOrLocal()) {
-    const local = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
-    return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
-  }
-  const q = query(collection(db, 'vaccination'), where('goatId', '==', goatId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => doc.data() as PPRVaccinationRecord);
+  const local = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
+  return local.filter((r) => r.goatId === goatId).sort((a, b) => (a.roundNumber || 0) - (b.roundNumber || 0));
 }
 
 export async function getGoatVaccination(goatId: string): Promise<PPRVaccinationRecord | null> {
@@ -697,30 +537,16 @@ export async function recordSale(
     updatedAt: now,
   };
 
-  if (useSheetsOrLocal()) {
-    await updateGoat(goatId, { status: 'sold', saleInfo: sale });
-    await indexedDB.addItem('sales', sale);
+  await updateGoat(goatId, { status: 'sold', saleInfo: sale });
+  await indexedDB.addItem('sales', sale);
 
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        await sheetsService.writeSaleSheet(sale);
-      } catch (err) {
-        console.error('Error syncing sale to Google Sheets:', err);
-      }
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      await sheetsService.writeSaleSheet(sale);
+    } catch (err) {
+      console.error('Error syncing sale to Google Sheets:', err);
     }
-    return id;
   }
-
-  await updateGoat(goatId, { status: 'sold', saleInfo: { ...saleData, id, createdAt: now, updatedAt: now } });
-
-  await setDoc(doc(db, 'sales', id), {
-    ...saleData,
-    id,
-    goatId,
-    createdAt: now,
-    updatedAt: now,
-  });
-
   return id;
 }
 
@@ -728,18 +554,8 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   if (isSupabaseEnabled()) {
     return supabaseService.getSaleInfo(goatId);
   }
-  if (useSheetsOrLocal()) {
-    const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
-    return localSales.find((s) => s.goatId === goatId) || null;
-  }
-
-  const q = query(
-    collection(db, 'sales'),
-    where('goatId', '==', goatId)
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.empty ? null : (snapshot.docs[0].data() as SaleInfo);
+  const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
+  return localSales.find((s) => s.goatId === goatId) || null;
 }
 
 // ─── Search and Filter ────────────────────────────────────────────────────────
@@ -813,44 +629,34 @@ export async function getAllDeworming(): Promise<DewormingRecord[]> {
   if (isSupabaseEnabled()) {
     return supabaseService.getAllDeworming();
   }
-  if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const data = await sheetsService.getDewormingSheet();
-        for (const r of data) {
-          await indexedDB.updateItem('deworming', r);
-        }
-        return data;
-      } catch (err) {
-        console.error('Error fetching deworming sheet:', err);
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      const data = await sheetsService.getDewormingSheet();
+      for (const r of data) {
+        await indexedDB.updateItem('deworming', r);
       }
+      return data;
+    } catch (err) {
+      console.error('Error fetching deworming sheet:', err);
     }
-    return await indexedDB.getAllItems<DewormingRecord>('deworming');
   }
-  // Firestore fallback
-  const snapshot = await getDocs(collection(db, 'deworming'));
-  return snapshot.docs.map((doc) => doc.data() as DewormingRecord);
+  return await indexedDB.getAllItems<DewormingRecord>('deworming');
 }
 
 export async function getAllVaccinations(): Promise<PPRVaccinationRecord[]> {
   if (isSupabaseEnabled()) {
     return supabaseService.getAllVaccinations();
   }
-  if (useSheetsOrLocal()) {
-    if (sheetsService.isSheetsConfigured()) {
-      try {
-        const data = await sheetsService.getVaccinationSheet();
-        for (const r of data) {
-          await indexedDB.updateItem('vaccination', r);
-        }
-        return data;
-      } catch (err) {
-        console.error('Error fetching vaccination sheet:', err);
+  if (sheetsService.isSheetsConfigured()) {
+    try {
+      const data = await sheetsService.getVaccinationSheet();
+      for (const r of data) {
+        await indexedDB.updateItem('vaccination', r);
       }
+      return data;
+    } catch (err) {
+      console.error('Error fetching vaccination sheet:', err);
     }
-    return await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
   }
-  // Firestore fallback
-  const snapshot = await getDocs(collection(db, 'vaccination'));
-  return snapshot.docs.map((doc) => doc.data() as PPRVaccinationRecord);
+  return await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
 }
