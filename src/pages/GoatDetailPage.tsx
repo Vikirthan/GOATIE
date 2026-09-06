@@ -144,7 +144,7 @@ export const GoatDetailPage: React.FC = () => {
   const statusDateInfo: Record<Goat['status'], { label: string; date: Date | string | undefined }> = {
     active: { label: 'Active since', date: goat.purchaseDate },
     sold: { label: 'Sold on', date: goat.saleInfo?.saleDate },
-    deceased: { label: 'Deceased on', date: goat.updatedAt },
+    deceased: { label: 'Deceased on', date: goat.deathDate ?? goat.updatedAt },
   };
   const { label: statusDateLabel, date: statusDate } = statusDateInfo[goat.status];
 
@@ -171,6 +171,27 @@ export const GoatDetailPage: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Quick Actions — act on this specific goat without re-searching by ear tag on the Dashboard */}
+      {goat.status === 'active' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            { label: 'Record Weight', icon: <Weight className="h-4 w-4" />, modal: 'weight' as const, color: 'bg-cyan-500 hover:bg-cyan-600' },
+            { label: 'Log Vaccine', icon: <Syringe className="h-4 w-4" />, modal: 'vaccine' as const, color: 'bg-violet-500 hover:bg-violet-600' },
+            { label: 'Log Deworming', icon: <Bug className="h-4 w-4" />, modal: 'deworming' as const, color: 'bg-blue-500 hover:bg-blue-600' },
+            { label: 'Sell Goat', icon: <ShoppingCart className="h-4 w-4" />, modal: 'sale' as const, color: 'bg-amber-500 hover:bg-amber-600' },
+          ].map(({ label, icon, modal, color }) => (
+            <button
+              key={modal}
+              onClick={() => navigate('/dashboard', { state: { usr: { openModal: modal, goatId: goat.id, earTag: goat.earTagNumber } } })}
+              className={`flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-medium text-white transition-colors ${color}`}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Key Stats Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

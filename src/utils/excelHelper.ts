@@ -1,13 +1,8 @@
 import ExcelJS from 'exceljs';
 import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
+import { buildGoatRow, buildWeightRow, buildDewormRow, buildVaccRow } from '@/utils/reconRows';
 
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
-
-const fmtDate = (d: Date | string | undefined | null): string => {
-  if (!d) return '';
-  const date = d instanceof Date ? d : new Date(d);
-  return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
-};
 
 const parseDate = (val: any): Date => {
   if (!val) return new Date();
@@ -47,6 +42,21 @@ function buildColIndex(worksheet: ExcelJS.Worksheet): Record<string, number> {
     if (v) map[v] = col;
   });
   return map;
+}
+
+/** Maps every data row (skipping the header) of a worksheet through `mapRow`,
+ *  which receives a `get(columnHeader)` accessor and returns either a parsed
+ *  record or null to skip that row (e.g. missing ear tag). */
+function mapRows<T>(worksheet: ExcelJS.Worksheet, mapRow: (get: (header: string) => any) => T | null): T[] {
+  const colIdx = buildColIndex(worksheet);
+  const results: T[] = [];
+  worksheet.eachRow((row, rowNum) => {
+    if (rowNum === 1) return;
+    const get = (header: string) => getCellVal(row, colIdx, header);
+    const mapped = mapRow(get);
+    if (mapped) results.push(mapped);
+  });
+  return results;
 }
 
 // ─── Export Interfaces ────────────────────────────────────────────────────────
@@ -194,23 +204,7 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
 
   goats.forEach((goat) => {
     const sale = sales.find((s) => s.goatId === goat.id) ?? goat.saleInfo;
-    goatSheet.addRow({
-      earTagNumber:   goat.earTagNumber,
-      variant:        goat.variant,
-      gender:         goat.gender,
-      purchaseDate:   fmtDate(goat.purchaseDate),
-      purchaseWeight: goat.purchaseWeight,
-      purchasePrice:  goat.purchasePrice,
-      sellerName:     goat.sellerName || '',
-      vaccination:    vaccSet.has(goat.id) ? 'Vaccinated' : 'Unvaccinated',
-      deworming:      dewormSet.has(goat.id) ? 'Dewormed' : 'Not done',
-      status:         goat.status,
-      saleWeight:     sale?.saleWeight ?? '',
-      saleRatePerKg:  sale?.saleRatePerKg ?? '',
-      saleAmount:     sale?.saleAmount ?? '',
-      netProfit:      sale?.netProfit ?? '',
-      notes:          goat.notes || '',
-    });
+    goatSheet.addRow(buildGoatRow(goat, sale, vaccSet.has(goat.id), dewormSet.has(goat.id)));
   });
 
   // ── Sheet 2: Monthly Weights ───────────────────────────────────────────────
@@ -234,15 +228,7 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
       return tagA.localeCompare(tagB) || a.weightNumber - b.weightNumber;
     })
     .forEach((w) => {
-      wSheet.addRow({
-        earTagNumber: goatById.get(w.goatId)?.earTagNumber ?? w.goatId,
-        weightNumber: w.weightNumber,
-        weight:       w.weight,
-        recordedDate: fmtDate(w.recordedDate),
-        dueDate:      fmtDate(w.dueDate),
-        weightGain:   w.weightGain ?? '',
-        remarks:      w.remarks || '',
-      });
+      wSheet.addRow(buildWeightRow(w, goatById.get(w.goatId)?.earTagNumber ?? w.goatId));
     });
 
   // ── Sheet 3: Deworming ─────────────────────────────────────────────────────
@@ -265,15 +251,7 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
       return tagA.localeCompare(tagB) || (a.roundNumber ?? 0) - (b.roundNumber ?? 0);
     })
     .forEach((d) => {
-      dSheet.addRow({
-        earTagNumber:   goatById.get(d.goatId)?.earTagNumber ?? d.goatId,
-        roundNumber:    d.roundNumber ?? '',
-        dewormingDate:  fmtDate(d.dewormingDate),
-        medicineUsed:   d.medicineUsed || '',
-        administeredBy: d.administeredBy || '',
-        batchNumber:    d.batchNumber || '',
-        remarks:        d.remarks || '',
-      });
+      dSheet.addRow(buildDewormRow(d, goatById.get(d.goatId)?.earTagNumber ?? d.goatId));
     });
 
   // ── Sheet 4: Vaccination ───────────────────────────────────────────────────
@@ -296,15 +274,7 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
       return tagA.localeCompare(tagB) || (a.roundNumber ?? 0) - (b.roundNumber ?? 0);
     })
     .forEach((v) => {
-      vSheet.addRow({
-        earTagNumber:    goatById.get(v.goatId)?.earTagNumber ?? v.goatId,
-        roundNumber:     v.roundNumber ?? '',
-        vaccinationDate: fmtDate(v.vaccinationDate),
-        vaccineBrand:    v.vaccineBrand || '',
-        administeredBy:  v.administeredBy || '',
-        batchNumber:     v.batchNumber || '',
-        remarks:         v.remarks || '',
-      });
+      vSheet.addRow(buildVaccRow(v, goatById.get(v.goatId)?.earTagNumber ?? v.goatId));
     });
 
   // ── Download ───────────────────────────────────────────────────────────────
@@ -343,101 +313,85 @@ export async function importFullExcelData(file: File): Promise<FullImportResult>
           if (!goatIdx[req]) throw new Error(`Required column "${req}" missing in Goats Data sheet`);
         }
 
-        goatWs.eachRow((row, rowNum) => {
-          if (rowNum === 1) return;
-          const earTag = getCellVal(row, goatIdx, GOAT_COLS.earTagNumber)?.toString().trim();
-          if (!earTag) return;
+        goats.push(...mapRows<ImportedGoatData>(goatWs, (get) => {
+          const earTag = get(GOAT_COLS.earTagNumber)?.toString().trim();
+          if (!earTag) return null;
 
-          let gender = getCellVal(row, goatIdx, GOAT_COLS.gender)?.toString().trim().toLowerCase();
+          let gender = get(GOAT_COLS.gender)?.toString().trim().toLowerCase();
           if (gender !== 'female' && gender !== 'male') gender = 'male';
 
-          let status = getCellVal(row, goatIdx, GOAT_COLS.status)?.toString().trim().toLowerCase();
+          let status = get(GOAT_COLS.status)?.toString().trim().toLowerCase();
           if (!['active', 'sold', 'deceased'].includes(status ?? '')) status = 'active';
 
-          const vaccVal = getCellVal(row, goatIdx, GOAT_COLS.vaccination)?.toString().trim().toLowerCase();
-          const dewVal  = getCellVal(row, goatIdx, GOAT_COLS.deworming)?.toString().trim().toLowerCase();
-          const saleWeightV  = getCellVal(row, goatIdx, GOAT_COLS.saleWeight);
-          const saleRateV    = getCellVal(row, goatIdx, GOAT_COLS.saleRatePerKg);
+          const vaccVal = get(GOAT_COLS.vaccination)?.toString().trim().toLowerCase();
+          const dewVal  = get(GOAT_COLS.deworming)?.toString().trim().toLowerCase();
+          const saleWeightV  = get(GOAT_COLS.saleWeight);
+          const saleRateV    = get(GOAT_COLS.saleRatePerKg);
 
-          goats.push({
+          return {
             earTagNumber:    earTag,
-            variant:         getCellVal(row, goatIdx, GOAT_COLS.variant)?.toString().trim() || 'LOCAL',
+            variant:         get(GOAT_COLS.variant)?.toString().trim() || 'LOCAL',
             gender:          gender as 'male' | 'female',
-            purchaseDate:    parseDate(getCellVal(row, goatIdx, GOAT_COLS.purchaseDate)),
-            purchaseWeight:  parseNum(getCellVal(row, goatIdx, GOAT_COLS.purchaseWeight)),
-            purchasePrice:   parseNum(getCellVal(row, goatIdx, GOAT_COLS.purchasePrice)),
-            sellerName:      getCellVal(row, goatIdx, GOAT_COLS.sellerName)?.toString().trim() || 'N/A',
-            notes:           getCellVal(row, goatIdx, GOAT_COLS.notes)?.toString().trim() || undefined,
+            purchaseDate:    parseDate(get(GOAT_COLS.purchaseDate)),
+            purchaseWeight:  parseNum(get(GOAT_COLS.purchaseWeight)),
+            purchasePrice:   parseNum(get(GOAT_COLS.purchasePrice)),
+            sellerName:      get(GOAT_COLS.sellerName)?.toString().trim() || 'N/A',
+            notes:           get(GOAT_COLS.notes)?.toString().trim() || undefined,
             status:          status as 'active' | 'sold' | 'deceased',
             vaccinationStatus: vaccVal === 'vaccinated' ? 'vaccinated' : 'unvaccinated',
             dewormingStatus:   dewVal === 'dewormed' ? 'dewormed' : 'not done',
             saleWeight:      saleWeightV ? parseNum(saleWeightV) : undefined,
             saleRatePerKg:   saleRateV ? parseNum(saleRateV) : undefined,
-          });
-        });
+          };
+        }));
 
         // ── Weights Sheet ────────────────────────────────────────────────────
-        const weights: ImportedWeightData[] = [];
         const wWs = workbook.getWorksheet('Monthly Weights');
-        if (wWs) {
-          const wIdx = buildColIndex(wWs);
-          wWs.eachRow((row, rowNum) => {
-            if (rowNum === 1) return;
-            const earTag = getCellVal(row, wIdx, WEIGHT_COLS.earTagNumber)?.toString().trim();
-            const weightVal = parseNum(getCellVal(row, wIdx, WEIGHT_COLS.weight));
-            if (!earTag || weightVal <= 0) return;
-            weights.push({
-              earTagNumber: earTag,
-              weightNumber: parseNum(getCellVal(row, wIdx, WEIGHT_COLS.weightNumber), 0),
-              weight:       weightVal,
-              recordedDate: parseDate(getCellVal(row, wIdx, WEIGHT_COLS.recordedDate)),
-              dueDate:      parseDate(getCellVal(row, wIdx, WEIGHT_COLS.dueDate)),
-              remarks:      getCellVal(row, wIdx, WEIGHT_COLS.remarks)?.toString().trim() || undefined,
-            });
-          });
-        }
+        const weights: ImportedWeightData[] = wWs ? mapRows<ImportedWeightData>(wWs, (get) => {
+          const earTag = get(WEIGHT_COLS.earTagNumber)?.toString().trim();
+          const weightVal = parseNum(get(WEIGHT_COLS.weight));
+          if (!earTag || weightVal <= 0) return null;
+          return {
+            earTagNumber: earTag,
+            weightNumber: parseNum(get(WEIGHT_COLS.weightNumber), 0),
+            weight:       weightVal,
+            recordedDate: parseDate(get(WEIGHT_COLS.recordedDate)),
+            dueDate:      parseDate(get(WEIGHT_COLS.dueDate)),
+            remarks:      get(WEIGHT_COLS.remarks)?.toString().trim() || undefined,
+          };
+        }) : [];
 
         // ── Deworming Sheet ──────────────────────────────────────────────────
-        const dewormings: ImportedDewormingData[] = [];
         const dWs = workbook.getWorksheet('Deworming');
-        if (dWs) {
-          const dIdx = buildColIndex(dWs);
-          dWs.eachRow((row, rowNum) => {
-            if (rowNum === 1) return;
-            const earTag = getCellVal(row, dIdx, DEWORM_COLS.earTagNumber)?.toString().trim();
-            if (!earTag) return;
-            dewormings.push({
-              earTagNumber:   earTag,
-              dewormingDate:  parseDate(getCellVal(row, dIdx, DEWORM_COLS.dewormingDate)),
-              roundNumber:    parseNum(getCellVal(row, dIdx, DEWORM_COLS.roundNumber)) || undefined,
-              medicineUsed:   getCellVal(row, dIdx, DEWORM_COLS.medicineUsed)?.toString().trim() || undefined,
-              administeredBy: getCellVal(row, dIdx, DEWORM_COLS.administeredBy)?.toString().trim() || undefined,
-              batchNumber:    getCellVal(row, dIdx, DEWORM_COLS.batchNumber)?.toString().trim() || undefined,
-              remarks:        getCellVal(row, dIdx, DEWORM_COLS.remarks)?.toString().trim() || undefined,
-            });
-          });
-        }
+        const dewormings: ImportedDewormingData[] = dWs ? mapRows<ImportedDewormingData>(dWs, (get) => {
+          const earTag = get(DEWORM_COLS.earTagNumber)?.toString().trim();
+          if (!earTag) return null;
+          return {
+            earTagNumber:   earTag,
+            dewormingDate:  parseDate(get(DEWORM_COLS.dewormingDate)),
+            roundNumber:    parseNum(get(DEWORM_COLS.roundNumber)) || undefined,
+            medicineUsed:   get(DEWORM_COLS.medicineUsed)?.toString().trim() || undefined,
+            administeredBy: get(DEWORM_COLS.administeredBy)?.toString().trim() || undefined,
+            batchNumber:    get(DEWORM_COLS.batchNumber)?.toString().trim() || undefined,
+            remarks:        get(DEWORM_COLS.remarks)?.toString().trim() || undefined,
+          };
+        }) : [];
 
         // ── Vaccination Sheet ────────────────────────────────────────────────
-        const vaccinations: ImportedVaccinationData[] = [];
         const vWs = workbook.getWorksheet('Vaccination');
-        if (vWs) {
-          const vIdx = buildColIndex(vWs);
-          vWs.eachRow((row, rowNum) => {
-            if (rowNum === 1) return;
-            const earTag = getCellVal(row, vIdx, VACC_COLS.earTagNumber)?.toString().trim();
-            if (!earTag) return;
-            vaccinations.push({
-              earTagNumber:    earTag,
-              vaccinationDate: parseDate(getCellVal(row, vIdx, VACC_COLS.vaccinationDate)),
-              roundNumber:     parseNum(getCellVal(row, vIdx, VACC_COLS.roundNumber)) || undefined,
-              vaccineBrand:    getCellVal(row, vIdx, VACC_COLS.vaccineBrand)?.toString().trim() || undefined,
-              administeredBy:  getCellVal(row, vIdx, VACC_COLS.administeredBy)?.toString().trim() || undefined,
-              batchNumber:     getCellVal(row, vIdx, VACC_COLS.batchNumber)?.toString().trim() || undefined,
-              remarks:         getCellVal(row, vIdx, VACC_COLS.remarks)?.toString().trim() || undefined,
-            });
-          });
-        }
+        const vaccinations: ImportedVaccinationData[] = vWs ? mapRows<ImportedVaccinationData>(vWs, (get) => {
+          const earTag = get(VACC_COLS.earTagNumber)?.toString().trim();
+          if (!earTag) return null;
+          return {
+            earTagNumber:    earTag,
+            vaccinationDate: parseDate(get(VACC_COLS.vaccinationDate)),
+            roundNumber:     parseNum(get(VACC_COLS.roundNumber)) || undefined,
+            vaccineBrand:    get(VACC_COLS.vaccineBrand)?.toString().trim() || undefined,
+            administeredBy:  get(VACC_COLS.administeredBy)?.toString().trim() || undefined,
+            batchNumber:     get(VACC_COLS.batchNumber)?.toString().trim() || undefined,
+            remarks:         get(VACC_COLS.remarks)?.toString().trim() || undefined,
+          };
+        }) : [];
 
         resolve({ goats, weights, dewormings, vaccinations });
       } catch (err) {

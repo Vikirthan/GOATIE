@@ -43,34 +43,55 @@ export const GoatRegistrationPage: React.FC = () => {
     loadVariants();
   }, []);
 
-  // ─── Bidirectional price calculation ──────────────────────────────────────
-  const handleTotalPriceChange = (val: string) => {
-    const total = parseFloat(val);
-    const weight = parseFloat(formData.purchaseWeight);
-    const perKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
-    setFormData({ ...formData, purchasePrice: val, purchasePricePerKg: perKg });
-  };
+  // ─── Debounced duplicate ear-tag check ────────────────────────────────────
+  const [earTagCheck, setEarTagCheck] = useState<'idle' | 'checking' | 'duplicate' | 'available'>('idle');
 
-  const handlePricePerKgChange = (val: string) => {
-    const rate = parseFloat(val);
-    const weight = parseFloat(formData.purchaseWeight);
-    const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
-    setFormData({ ...formData, purchasePricePerKg: val, purchasePrice: total });
-  };
-
-  const handleWeightChange = (val: string) => {
-    const weight = parseFloat(val);
-    if (formData.purchasePrice) {
-      const total = parseFloat(formData.purchasePrice);
-      const perKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
-      setFormData({ ...formData, purchaseWeight: val, purchasePricePerKg: perKg });
-    } else if (formData.purchasePricePerKg) {
-      const rate = parseFloat(formData.purchasePricePerKg);
-      const total = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
-      setFormData({ ...formData, purchaseWeight: val, purchasePrice: total });
-    } else {
-      setFormData({ ...formData, purchaseWeight: val });
+  useEffect(() => {
+    const tag = formData.earTagNumber.trim();
+    if (!tag || !user) {
+      setEarTagCheck('idle');
+      return;
     }
+    setEarTagCheck('checking');
+    const timer = setTimeout(async () => {
+      try {
+        const existing = await getGoatByEarTag(user.id, tag);
+        setEarTagCheck(existing ? 'duplicate' : 'available');
+      } catch {
+        setEarTagCheck('idle');
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [formData.earTagNumber, user]);
+
+  // ─── Bidirectional price calculation ──────────────────────────────────────
+  // Editing any one of weight / total price / price-per-kg recalculates whichever
+  // of the other price fields was already filled in.
+  type PriceField = 'purchaseWeight' | 'purchasePrice' | 'purchasePricePerKg';
+
+  const handlePriceFieldChange = (field: PriceField, val: string) => {
+    setFormData((prev) => {
+      const next = { ...prev, [field]: val };
+      const weight = parseFloat(field === 'purchaseWeight' ? val : prev.purchaseWeight);
+
+      if (field === 'purchaseWeight') {
+        if (prev.purchasePrice) {
+          const total = parseFloat(prev.purchasePrice);
+          next.purchasePricePerKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
+        } else if (prev.purchasePricePerKg) {
+          const rate = parseFloat(prev.purchasePricePerKg);
+          next.purchasePrice = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
+        }
+      } else if (field === 'purchasePrice') {
+        const total = parseFloat(val);
+        next.purchasePricePerKg = total > 0 && weight > 0 ? (total / weight).toFixed(2) : '';
+      } else {
+        const rate = parseFloat(val);
+        next.purchasePrice = rate > 0 && weight > 0 ? (rate * weight).toFixed(2) : '';
+      }
+
+      return next;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -154,7 +175,13 @@ export const GoatRegistrationPage: React.FC = () => {
                   value={formData.earTagNumber}
                   onChange={(e) => setFormData({ ...formData, earTagNumber: e.target.value })}
                   required
+                  aria-describedby="earTagNumber-status"
                 />
+                <p id="earTagNumber-status" className="text-xs mt-1 min-h-[1em]">
+                  {earTagCheck === 'checking' && <span className="text-muted-foreground">Checking availability…</span>}
+                  {earTagCheck === 'duplicate' && <span className="text-red-500">This goat number is already in use by an active goat</span>}
+                  {earTagCheck === 'available' && <span className="text-emerald-600 dark:text-emerald-400">Available</span>}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -203,7 +230,7 @@ export const GoatRegistrationPage: React.FC = () => {
                     placeholder="0.0"
                     step="0.1"
                     value={formData.purchaseWeight}
-                    onChange={(e) => handleWeightChange(e.target.value)}
+                    onChange={(e) => handlePriceFieldChange('purchaseWeight', e.target.value)}
                     required
                   />
                 </div>
@@ -224,7 +251,7 @@ export const GoatRegistrationPage: React.FC = () => {
                       placeholder="0.00"
                       step="0.01"
                       value={formData.purchasePrice}
-                      onChange={(e) => handleTotalPriceChange(e.target.value)}
+                      onChange={(e) => handlePriceFieldChange('purchasePrice', e.target.value)}
                       required
                     />
                   </div>
@@ -236,7 +263,7 @@ export const GoatRegistrationPage: React.FC = () => {
                       placeholder="0.00"
                       step="0.01"
                       value={formData.purchasePricePerKg}
-                      onChange={(e) => handlePricePerKgChange(e.target.value)}
+                      onChange={(e) => handlePriceFieldChange('purchasePricePerKg', e.target.value)}
                     />
                   </div>
                 </div>
