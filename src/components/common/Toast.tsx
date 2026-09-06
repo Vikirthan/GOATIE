@@ -41,6 +41,7 @@ export const ToastItem: React.FC<ToastItemProps> = ({ toast, onClose }) => {
 
   return (
     <div
+      role={toast.type === 'error' ? 'alert' : 'status'}
       className={cn(
         'flex items-start gap-3 rounded-lg border p-4 shadow-lg animate-slideUp',
         backgrounds[toast.type]
@@ -90,7 +91,11 @@ export const ToastContainer: React.FC = () => {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-md">
+    <div
+      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-md"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onClose={removeToast} />
       ))}
