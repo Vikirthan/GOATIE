@@ -626,8 +626,9 @@ export const GoatsListPage: React.FC = () => {
             <Weight className="h-4 w-4 text-muted-foreground shrink-0" />
             <Input
               id="weight-min-input"
-              type="number"
+              type="text"
               inputMode="decimal"
+              pattern="[0-9]*[.,]?[0-9]*"
               placeholder="Min kg"
               value={weightMin}
               onChange={(e) => setWeightMin(e.target.value)}
@@ -636,13 +637,15 @@ export const GoatsListPage: React.FC = () => {
             <span className="text-muted-foreground text-sm">–</span>
             <Input
               id="weight-max-input"
-              type="number"
+              type="text"
               inputMode="decimal"
+              pattern="[0-9]*[.,]?[0-9]*"
               placeholder="Max kg"
               value={weightMax}
               onChange={(e) => setWeightMax(e.target.value)}
               className="w-24 text-sm"
             />
+            <span className="text-xs text-muted-foreground">Weight</span>
             {(weightMin || weightMax) && (
               <button
                 onClick={() => { setWeightMin(''); setWeightMax(''); }}
@@ -659,8 +662,9 @@ export const GoatsListPage: React.FC = () => {
             <Weight className="h-4 w-4 text-emerald-500 shrink-0" />
             <Input
               id="weight-gain-min-input"
-              type="number"
+              type="text"
               inputMode="decimal"
+              pattern="[0-9]*[.,]?[0-9]*"
               placeholder="Min gain"
               value={weightGainMin}
               onChange={(e) => setWeightGainMin(e.target.value)}
@@ -669,13 +673,15 @@ export const GoatsListPage: React.FC = () => {
             <span className="text-muted-foreground text-sm">–</span>
             <Input
               id="weight-gain-max-input"
-              type="number"
+              type="text"
               inputMode="decimal"
+              pattern="[0-9]*[.,]?[0-9]*"
               placeholder="Max gain"
               value={weightGainMax}
               onChange={(e) => setWeightGainMax(e.target.value)}
               className="w-24 text-sm"
             />
+            <span className="text-xs text-muted-foreground">Gain</span>
             {(weightGainMin || weightGainMax) && (
               <button
                 onClick={() => { setWeightGainMin(''); setWeightGainMax(''); }}
