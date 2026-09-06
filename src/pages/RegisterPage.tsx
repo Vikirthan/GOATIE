@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { showToast } from '@/components/common/Toast';
+import { BuildInfoFooter } from '@/components/common/BuildInfoFooter';
 import { registerWithEmail } from '@/services/authService';
 
 export const RegisterPage: React.FC = () => {
@@ -126,30 +127,7 @@ export const RegisterPage: React.FC = () => {
             </button>
           </p>
 
-          {(() => {
-            // @ts-ignore
-            const buildTimeStr = import.meta.env.VITE_APP_BUILD_TIME;
-            if (!buildTimeStr) return null;
-            try {
-              const date = new Date(buildTimeStr);
-              const formatted = date.toLocaleString('en-IN', {
-                day: '2-digit',
-                month: 'short',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: true
-              });
-              return (
-                <div className="mt-6 pt-4 border-t border-border/60 text-center text-xs text-muted-foreground/80 flex items-center justify-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>V.1 Goatie • App Last Updated: {formatted}</span>
-                </div>
-              );
-            } catch (e) {
-              return null;
-            }
-          })()}
+          <BuildInfoFooter />
         </CardContent>
       </Card>
     </div>

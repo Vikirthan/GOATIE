@@ -1,22 +1,5 @@
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  updateProfile,
-  GoogleAuthProvider,
-  signInWithPopup,
-} from 'firebase/auth';
-import { auth, db } from '@/lib/firebase';
 import { User } from '@/types';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { supabase } from '@/lib/supabase';
-
-const googleProvider = new GoogleAuthProvider();
-
-const isSupabaseEnabled = (): boolean => {
-  return !!import.meta.env.VITE_SUPABASE_URL;
-};
 
 // Hardcoded credentials for demo
 const DEMO_USERNAME = 'RKT';
@@ -53,62 +36,31 @@ function notifyAuthListeners(user: User | null) {
   });
 }
 
-// Check if Firebase is initialized
-const isFirebaseReady = () => {
-  if (!auth || !db) {
-    throw new Error('Firebase is not initialized. Please configure your Firebase credentials.');
-  }
-};
-
 // Check if using demo credentials
 export function isDemoMode(): boolean {
-  return !auth || !db || localStorage.getItem('goatie_logged_in_user') !== null;
+  return localStorage.getItem('goatie_logged_in_user') !== null;
 }
 
 export async function registerWithEmail(email: string, password: string, displayName: string): Promise<User> {
-  if (isSupabaseEnabled()) {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          display_name: displayName,
-        },
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        display_name: displayName,
       },
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error('Registration failed.');
-    return {
-      id: data.user.id,
-      email: data.user.email || '',
-      displayName,
-      role: 'farmer',
-      createdAt: new Date(data.user.created_at),
-      updatedAt: new Date(data.user.updated_at || data.user.created_at),
-    };
-  }
-
-  isFirebaseReady();
-  const userCredential = await createUserWithEmailAndPassword(auth!, email, password);
-  
-  await updateProfile(userCredential.user, {
-    displayName,
+    },
   });
-
-  const user: User = {
-    id: userCredential.user.uid,
-    email: userCredential.user.email || '',
-    displayName: displayName,
-    photoURL: userCredential.user.photoURL || undefined,
+  if (error) throw error;
+  if (!data.user) throw new Error('Registration failed.');
+  return {
+    id: data.user.id,
+    email: data.user.email || '',
+    displayName,
     role: 'farmer',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+    createdAt: new Date(data.user.created_at),
+    updatedAt: new Date(data.user.updated_at || data.user.created_at),
   };
-
-  // Save user to Firestore
-  await setDoc(doc(db!, 'users', user.id), user);
-
-  return user;
 }
 
 export async function loginWithEmail(email: string, password: string): Promise<User> {
@@ -124,62 +76,20 @@ export async function loginWithEmail(email: string, password: string): Promise<U
     return VIKI_USER;
   }
 
-  if (isSupabaseEnabled()) {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) throw error;
-    if (!data.user) throw new Error('User not found.');
-    const user: User = {
-      id: data.user.id,
-      email: data.user.email || '',
-      displayName: data.user.user_metadata?.display_name || data.user.email?.split('@')[0] || 'User',
-      role: 'farmer',
-      createdAt: new Date(data.user.created_at),
-      updatedAt: new Date(data.user.updated_at || data.user.created_at),
-    };
-    notifyAuthListeners(user);
-    return user;
-  }
-
-  isFirebaseReady();
-  const userCredential = await signInWithEmailAndPassword(auth!, email, password);
-  const user = await getUserFromFirestore(userCredential.user.uid);
-  notifyAuthListeners(user);
-  return user;
-}
-
-export async function loginWithGoogle(): Promise<User> {
-  if (isSupabaseEnabled()) {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-    });
-    if (error) throw error;
-    return {} as User;
-  }
-
-  isFirebaseReady();
-  const result = await signInWithPopup(auth!, googleProvider);
-  
-  // Check if user exists in Firestore
-  let user = await getUserFromFirestore(result.user.uid);
-
-  if (!user) {
-    // Create new user
-    user = {
-      id: result.user.uid,
-      email: result.user.email || '',
-      displayName: result.user.displayName || '',
-      photoURL: result.user.photoURL || undefined,
-      role: 'farmer',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
-
-    await setDoc(doc(db!, 'users', user.id), user);
-  }
-
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+  if (error) throw error;
+  if (!data.user) throw new Error('User not found.');
+  const user: User = {
+    id: data.user.id,
+    email: data.user.email || '',
+    displayName: data.user.user_metadata?.display_name || data.user.email?.split('@')[0] || 'User',
+    role: 'farmer',
+    createdAt: new Date(data.user.created_at),
+    updatedAt: new Date(data.user.updated_at || data.user.created_at),
+  };
   notifyAuthListeners(user);
   return user;
 }
@@ -187,13 +97,7 @@ export async function loginWithGoogle(): Promise<User> {
 export async function logout(): Promise<void> {
   localStorage.removeItem('goatie_logged_in_user');
   notifyAuthListeners(null);
-  if (isSupabaseEnabled()) {
-    await supabase.auth.signOut();
-    return;
-  }
-  if (auth) {
-    await signOut(auth!);
-  }
+  await supabase.auth.signOut();
 }
 
 export async function getCurrentUser(): Promise<User | null> {
@@ -209,38 +113,16 @@ export async function getCurrentUser(): Promise<User | null> {
     }
   }
 
-  if (isSupabaseEnabled()) {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) return null;
-    return {
-      id: user.id,
-      email: user.email || '',
-      displayName: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
-      role: 'farmer',
-      createdAt: new Date(user.created_at),
-      updatedAt: new Date(user.updated_at || user.created_at),
-    };
-  }
-
-  if (!auth) return null;
-  const firebaseUser = auth.currentUser;
-  if (!firebaseUser) return null;
-
-  return await getUserFromFirestore(firebaseUser.uid);
-}
-
-export async function getUserFromFirestore(userId: string): Promise<User> {
-  if (!db) {
-    throw new Error('Firebase Firestore is not initialized');
-  }
-  
-  const userDoc = await getDoc(doc(db, 'users', userId));
-
-  if (!userDoc.exists()) {
-    throw new Error('User not found');
-  }
-
-  return userDoc.data() as User;
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+  return {
+    id: user.id,
+    email: user.email || '',
+    displayName: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
+    role: 'farmer',
+    createdAt: new Date(user.created_at),
+    updatedAt: new Date(user.updated_at || user.created_at),
+  };
 }
 
 export function onAuthChange(callback: (user: User | null) => void): () => void {
@@ -258,75 +140,53 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
       console.error('Error parsing cached demo user:', e);
       callback(null);
     }
-  } else if (isSupabaseEnabled()) {
-    // Initial fetch of current user — read the locally cached session (no network
-    // round-trip) so the app isn't blocked waiting on a server call before it can
-    // render. Supabase verifies/refreshes the token in the background as needed,
-    // and onAuthStateChange below will correct `callback` if the session turns out
-    // to be invalid.
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (localStorage.getItem('goatie_logged_in_user')) return;
-      const user = session?.user;
-      if (user) {
-        callback({
-          id: user.id,
-          email: user.email || '',
-          displayName: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
-          role: 'farmer',
-          createdAt: new Date(user.created_at),
-          updatedAt: new Date(user.updated_at || user.created_at),
-        });
-      } else {
-        callback(null);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (localStorage.getItem('goatie_logged_in_user')) return;
-      if (session?.user) {
-        callback({
-          id: session.user.id,
-          email: session.user.email || '',
-          displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'User',
-          role: 'farmer',
-          createdAt: new Date(session.user.created_at),
-          updatedAt: new Date(session.user.updated_at || session.user.created_at),
-        });
-      } else {
-        callback(null);
-      }
-    });
 
     return () => {
       authListeners.delete(callback);
-      subscription.unsubscribe();
     };
-  } else if (!auth) {
-    callback(null);
   }
 
-  let unsubscribeFirebase = () => {};
-  if (auth) {
-    unsubscribeFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (localStorage.getItem('goatie_logged_in_user')) return; // Ignore if demo user is active
+  // Initial fetch of current user — read the locally cached session (no network
+  // round-trip) so the app isn't blocked waiting on a server call before it can
+  // render. Supabase verifies/refreshes the token in the background as needed,
+  // and onAuthStateChange below will correct `callback` if the session turns out
+  // to be invalid.
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (localStorage.getItem('goatie_logged_in_user')) return;
+    const user = session?.user;
+    if (user) {
+      callback({
+        id: user.id,
+        email: user.email || '',
+        displayName: user.user_metadata?.display_name || user.email?.split('@')[0] || 'User',
+        role: 'farmer',
+        createdAt: new Date(user.created_at),
+        updatedAt: new Date(user.updated_at || user.created_at),
+      });
+    } else {
+      callback(null);
+    }
+  });
 
-      if (firebaseUser) {
-        try {
-          const user = await getUserFromFirestore(firebaseUser.uid);
-          callback(user);
-        } catch (error) {
-          console.error('Error fetching user data:', error);
-          callback(null);
-        }
-      } else {
-        callback(null);
-      }
-    });
-  }
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (localStorage.getItem('goatie_logged_in_user')) return;
+    if (session?.user) {
+      callback({
+        id: session.user.id,
+        email: session.user.email || '',
+        displayName: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'User',
+        role: 'farmer',
+        createdAt: new Date(session.user.created_at),
+        updatedAt: new Date(session.user.updated_at || session.user.created_at),
+      });
+    } else {
+      callback(null);
+    }
+  });
 
   return () => {
     authListeners.delete(callback);
-    unsubscribeFirebase();
+    subscription.unsubscribe();
   };
 }
 
@@ -334,12 +194,5 @@ export function getAuthToken(): Promise<string | null> {
   if (localStorage.getItem('goatie_logged_in_user')) {
     return Promise.resolve('demo_token');
   }
-  if (isSupabaseEnabled()) {
-    return supabase.auth.getSession().then(({ data: { session } }) => session?.access_token || null);
-  }
-  if (!auth || !auth.currentUser) {
-    return Promise.resolve(null);
-  }
-  return auth.currentUser.getIdToken() ?? Promise.resolve(null);
+  return supabase.auth.getSession().then(({ data: { session } }) => session?.access_token || null);
 }
-

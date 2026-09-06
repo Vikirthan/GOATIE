@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { useAuth } from '@/context/AuthContext';
@@ -91,6 +91,7 @@ const GoatSearchDropdown = ({
 
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: queryData, isLoading: queryLoading, refetch } = useDashboardData(user?.id);
@@ -171,6 +172,38 @@ export const DashboardPage: React.FC = () => {
     saleTotalPrice: '',
     remarks: '',
   });
+
+  // Opened via a "Record Weight for this goat" style deep link (e.g. from the Goat
+  // Detail page) instead of the generic Quick Actions row — pre-fills the search
+  // and opens the right modal directly instead of making the user re-search by ear tag.
+  useEffect(() => {
+    const deepLink = location.state?.usr as
+      | { openModal: 'weight' | 'vaccine' | 'deworming' | 'sale'; goatId: string; earTag: string }
+      | undefined;
+    if (!deepLink) return;
+
+    const { openModal, goatId, earTag } = deepLink;
+    if (openModal === 'weight') {
+      setWeightGoatSearch(earTag);
+      setWeightForm((prev) => ({ ...prev, goatId }));
+      setShowWeightModal(true);
+    } else if (openModal === 'vaccine') {
+      setVaccineSearch(earTag);
+      setVaccineForm((prev) => ({ ...prev, goatId }));
+      setShowVaccineModal(true);
+    } else if (openModal === 'deworming') {
+      setDewormingSearch(earTag);
+      setDewormingForm((prev) => ({ ...prev, goatId }));
+      setShowDewormingModal(true);
+    } else if (openModal === 'sale') {
+      setSaleGoatSearch(earTag);
+      setSaleForm((prev) => ({ ...prev, goatId }));
+      setShowSaleModal(true);
+    }
+
+    // Clear location state so refreshing/navigating back doesn't reopen the modal.
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state, location.pathname, navigate]);
 
   const getNextAvailableMonth = (goatId: string, weights: WeightRecord[]) => {
     const goatWeights = weights.filter(w => w.goatId === goatId && w.isRecorded);

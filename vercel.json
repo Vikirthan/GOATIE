@@ -4,5 +4,11 @@
       "source": "/(.*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/recon-sheets",
+      "schedule": "29 18 * * 0"
+    }
   ]
 }
