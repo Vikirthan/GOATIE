@@ -22,6 +22,15 @@ const formatDate = (date: Date | string | undefined): string => {
   }
 };
 
+const formatDateShort = (date: Date | string | undefined): string => {
+  if (!date) return 'N/A';
+  try {
+    return format(new Date(date), 'dd/MM/yy');
+  } catch {
+    return 'N/A';
+  }
+};
+
 const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   const styles: Record<string, string> = {
     active: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
@@ -131,6 +140,14 @@ export const GoatDetailPage: React.FC = () => {
   const extraWeights = recordedWeights
     .filter((w) => w.weightNumber > 4)
     .sort((a, b) => a.weightNumber - b.weightNumber);
+
+  const statusDateInfo: Record<Goat['status'], { label: string; date: Date | string | undefined }> = {
+    active: { label: 'Active since', date: goat.purchaseDate },
+    sold: { label: 'Sold on', date: goat.saleInfo?.saleDate },
+    deceased: { label: 'Deceased on', date: goat.updatedAt },
+  };
+  const { label: statusDateLabel, date: statusDate } = statusDateInfo[goat.status];
+
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
       {/* Header */}
@@ -148,7 +165,10 @@ export const GoatDetailPage: React.FC = () => {
             </h1>
             <StatusBadge status={goat.status} />
           </div>
-          <p className="text-sm text-muted-foreground mt-0.5">{goat.variant} · {goat.gender === 'male' ? '♂ Male' : '♀ Female'}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {goat.variant} · {goat.gender === 'male' ? '♂ Male' : '♀ Female'}
+            {statusDate && <> · {statusDateLabel} {formatDateShort(statusDate)}</>}
+          </p>
         </div>
       </div>
 

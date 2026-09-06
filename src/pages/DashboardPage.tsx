@@ -15,10 +15,8 @@ import {
   recordWeight,
   recordSale,
   getGoatWeights,
-  isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
-import { supabase } from '@/lib/supabase';
 import { Goat, WeightRecord } from '@/types';
 import { formatDate } from '@/utils/helpers';
 import {
@@ -321,27 +319,6 @@ export const DashboardPage: React.FC = () => {
       setAllWeights(freshWeights);
       setSalesChartData(computeTrend(allGoats));
 
-      if (freshActive.length > 0) {
-        const first = freshActive[0];
-        setWeightGoatSearch('');
-        setSaleGoatSearch(first.earTagNumber);
-        setWeightForm((prev) => ({ ...prev, goatId: '', weightNumber: '1' }));
-        setSaleForm((prev) => ({ ...prev, goatId: first.id }));
-      }
-      if (vacc.length > 0) {
-        setVaccineSearch(vacc[0].earTagNumber);
-        setVaccineForm((prev) => ({ ...prev, goatId: vacc[0].id }));
-      } else {
-        setVaccineSearch('');
-        setVaccineForm((prev) => ({ ...prev, goatId: '' }));
-      }
-      if (deworm.length > 0) {
-        setDewormingSearch(deworm[0].earTagNumber);
-        setDewormingForm((prev) => ({ ...prev, goatId: deworm[0].id }));
-      } else {
-        setDewormingSearch('');
-        setDewormingForm((prev) => ({ ...prev, goatId: '' }));
-      }
     } catch (error) {
       console.error('Error processing network dashboard data:', error);
     }
@@ -369,7 +346,12 @@ export const DashboardPage: React.FC = () => {
       await indexedDB.clearStore('deworming');
       await indexedDB.clearStore('vaccination');
       await indexedDB.clearStore('sales');
-      
+
+      // Clear the persisted React Query cache so the reload can't restore stale data
+      // from localStorage; every query starts from scratch and hits the network fresh.
+      queryClient.clear();
+      localStorage.removeItem('goatie-query-cache');
+
       // Reload page
       window.location.reload();
     } catch (err) {
@@ -377,41 +359,6 @@ export const DashboardPage: React.FC = () => {
       window.location.reload();
     }
   };
-
-  useEffect(() => {
-    const handleSync = () => queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-    window.addEventListener('data-synced', handleSync);
-
-    if (isSupabaseEnabled()) {
-      const channel = supabase
-        .channel('public:dashboard')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'weights' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['dashboardData'] });
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-        window.removeEventListener('data-synced', handleSync);
-      };
-    }
-
-    return () => {
-      window.removeEventListener('data-synced', handleSync);
-    };
-  }, [user, queryClient]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -670,10 +617,26 @@ export const DashboardPage: React.FC = () => {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
             { label: 'Register Goat', icon: <Plus className="h-5 w-5" />, color: 'bg-emerald-500 hover:bg-emerald-600 text-white', action: () => navigate('/goats/register') },
-            { label: 'Record Weight', icon: <Scale className="h-5 w-5" />, color: 'bg-cyan-500 hover:bg-cyan-600 text-white', action: () => setShowWeightModal(true), disabled: goatsList.length === 0 },
-            { label: 'Log Vaccine', icon: <Syringe className="h-5 w-5" />, color: 'bg-violet-500 hover:bg-violet-600 text-white', action: () => setShowVaccineModal(true), disabled: goatsList.length === 0 },
-            { label: 'Log Deworming', icon: <Bug className="h-5 w-5" />, color: 'bg-blue-500 hover:bg-blue-600 text-white', action: () => setShowDewormingModal(true), disabled: goatsList.length === 0 },
-            { label: 'Sell Goat', icon: <ShoppingCart className="h-5 w-5" />, color: 'bg-amber-500 hover:bg-amber-600 text-white', action: () => setShowSaleModal(true), disabled: goatsList.length === 0 },
+            { label: 'Record Weight', icon: <Scale className="h-5 w-5" />, color: 'bg-cyan-500 hover:bg-cyan-600 text-white', action: () => {
+              setWeightGoatSearch('');
+              setWeightForm({ goatId: '', weightNumber: '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
+              setShowWeightModal(true);
+            }, disabled: goatsList.length === 0 },
+            { label: 'Log Vaccine', icon: <Syringe className="h-5 w-5" />, color: 'bg-violet-500 hover:bg-violet-600 text-white', action: () => {
+              setVaccineSearch('');
+              setVaccineForm({ goatId: '', vaccinationDate: new Date().toISOString().split('T')[0] });
+              setShowVaccineModal(true);
+            }, disabled: goatsList.length === 0 },
+            { label: 'Log Deworming', icon: <Bug className="h-5 w-5" />, color: 'bg-blue-500 hover:bg-blue-600 text-white', action: () => {
+              setDewormingSearch('');
+              setDewormingForm({ goatId: '', dewormingDate: new Date().toISOString().split('T')[0] });
+              setShowDewormingModal(true);
+            }, disabled: goatsList.length === 0 },
+            { label: 'Sell Goat', icon: <ShoppingCart className="h-5 w-5" />, color: 'bg-amber-500 hover:bg-amber-600 text-white', action: () => {
+              setSaleGoatSearch('');
+              setSaleForm({ goatId: '', saleDate: new Date().toISOString().split('T')[0], saleWeight: '', saleRatePerKg: '', saleTotalPrice: '', remarks: '' });
+              setShowSaleModal(true);
+            }, disabled: goatsList.length === 0 },
             { label: 'View All Goats', icon: <List className="h-5 w-5" />, color: 'bg-slate-600 hover:bg-slate-700 text-white', action: () => navigate('/goats') },
           ].map(({ label, icon, color, action, disabled }) => (
             <button
