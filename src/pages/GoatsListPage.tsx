@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import { useGoatsData } from '@/hooks/useGoatsData';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/common/Loaders';
@@ -15,10 +14,8 @@ import {
   deleteGoat,
   updateGoat,
   forceSync,
-  isSupabaseEnabled,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
-import { supabase } from '@/lib/supabase';
 import { Goat, DewormingRecord, PPRVaccinationRecord, WeightRecord } from '@/types';
 import { Plus, Search, Download, Upload, Trash2, Edit2, X, RefreshCw, Weight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
@@ -26,6 +23,16 @@ import { Label } from '@/components/ui/Label';
 import { exportGoatsToExcel, importFullExcelData } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { showToast } from '@/components/common/Toast';
+import { format } from 'date-fns';
+
+const formatEntryDate = (date: Date | string | undefined): string => {
+  if (!date) return '';
+  try {
+    return format(new Date(date), 'dd/MM/yy');
+  } catch {
+    return '';
+  }
+};
 
 /** Parse a weight filter expression:
  *  "15+"  → { min: 15, max: Infinity }
@@ -84,7 +91,6 @@ export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const { data: queryData, isLoading: queryLoading, refetch } = useGoatsData(user?.id);
   const loadGoatsList = (silent = false) => {
     if (!silent) setLoading(true);
@@ -238,6 +244,7 @@ export const GoatsListPage: React.FC = () => {
       console.error('Error processing network goats data:', error);
     } finally {
       setRefreshing(false);
+      setLoading(false);
     }
   }, [queryData, queryLoading, user]);
 
@@ -256,39 +263,7 @@ export const GoatsListPage: React.FC = () => {
   };
 
   useEffect(() => {
-    const handleSync = () => queryClient.invalidateQueries({ queryKey: ['goatsData'] });
-    window.addEventListener('data-synced', handleSync);
-
-    if (isSupabaseEnabled()) {
-      const channel = supabase
-        .channel('public:goats-list')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'goats' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'weights' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, () => {
-          queryClient.invalidateQueries({ queryKey: ['goatsData'] });
-        })
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-        window.removeEventListener('data-synced', handleSync);
-      };
-    }
-
-    return () => {
-      window.removeEventListener('data-synced', handleSync);
-    };
-  }, [user, queryClient]);
-
-  useEffect(() => {
-    let result = goats;
+    let result = [...goats].sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime());
     if (filter !== 'all') result = result.filter((g) => g.status === filter);
     if (variantFilter !== 'all') result = result.filter((g) => String(g.variant || '').toUpperCase() === variantFilter);
     if (searchTerm) {
@@ -346,21 +321,22 @@ export const GoatsListPage: React.FC = () => {
     setFilteredGoats(result);
   }, [goats, searchTerm, filter, variantFilter, weightFilter, weightGainFilter, latestWeightMap, weightRecords]);
 
-  // ── Export: passes all loaded data so the 4-sheet workbook is complete ──
+  // ── Export: passes only the currently filtered goats so the workbook matches what's on screen ──
   const handleExportExcel = async () => {
     try {
-      if (goats.length === 0) { showToast('warning', 'No goats to export'); return; }
+      if (filteredGoats.length === 0) { showToast('warning', 'No goats to export for the current filter'); return; }
       showToast('info', 'Preparing export…', 'Building all 4 sheets');
-      // Collect sales from saleInfo embedded in goats
-      const sales = goats.flatMap((g) => g.saleInfo ? [g.saleInfo] : []);
+      const filteredIds = new Set(filteredGoats.map((g) => g.id));
+      // Collect sales from saleInfo embedded in the filtered goats
+      const sales = filteredGoats.flatMap((g) => g.saleInfo ? [g.saleInfo] : []);
       await exportGoatsToExcel({
-        goats,
-        weights: weightRecords,
-        dewormings: dewormingRecords,
-        vaccinations: vaccineRecords,
+        goats: filteredGoats,
+        weights: weightRecords.filter((w) => filteredIds.has(w.goatId)),
+        dewormings: dewormingRecords.filter((d) => filteredIds.has(d.goatId)),
+        vaccinations: vaccineRecords.filter((v) => filteredIds.has(v.goatId)),
         sales,
       });
-      showToast('success', 'Excel exported!', '4 sheets: Goats, Weights, Deworming, Vaccination');
+      showToast('success', 'Excel exported!', `${filteredGoats.length} goat(s) matching current filter · 4 sheets`);
     } catch (error: any) {
       showToast('error', 'Export failed', error.message);
     }
@@ -714,6 +690,11 @@ export const GoatsListPage: React.FC = () => {
         </div>
       </div>
 
+      <p className="text-sm text-muted-foreground">
+        Showing <span className="font-semibold text-foreground">{filteredGoats.length}</span> of{' '}
+        <span className="font-semibold text-foreground">{goats.length}</span> goats
+      </p>
+
       {/* Goats List */}
       {filteredGoats.length === 0 ? (
         <EmptyState
@@ -733,6 +714,7 @@ export const GoatsListPage: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm border-b border-border">
+                    <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap w-12">S.No</th>
                     <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Ear Tag / Status</th>
                     <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Variant</th>
                     <th className="text-left font-semibold text-muted-foreground px-4 py-3 whitespace-nowrap">Gender</th>
@@ -754,6 +736,7 @@ export const GoatsListPage: React.FC = () => {
                         onClick={() => navigate(`/goats/${goat.id}`)}
                         className={`cursor-pointer transition-colors duration-150 hover:bg-accent/50 ${idx % 2 === 0 ? 'bg-transparent' : 'bg-muted/20'}`}
                       >
+                        <td className="px-4 py-3.5 whitespace-nowrap text-muted-foreground tabular-nums">{idx + 1}</td>
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           <span className={`font-semibold ${goat.status === 'sold' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
                             {goat.earTagNumber}
@@ -802,6 +785,9 @@ export const GoatsListPage: React.FC = () => {
                           }`}>
                             {goat.status.charAt(0).toUpperCase() + goat.status.slice(1)}
                           </span>
+                          <span className="block text-[10px] text-muted-foreground mt-1">
+                            {formatEntryDate(goat.purchaseDate)}
+                          </span>
                         </td>
                         <td className="px-4 py-3.5 text-center whitespace-nowrap">
                           <button
@@ -832,7 +818,7 @@ export const GoatsListPage: React.FC = () => {
 
           {/* ── Mobile Cards ── */}
           <div className="md:hidden space-y-3">
-            {filteredGoats.map((goat) => {
+            {filteredGoats.map((goat, idx) => {
               const vaccineStatus = getGoatVaccineStatus(goat.id);
               const dewormStatus = getGoatDewormingStatus(goat.id);
               return (
@@ -847,6 +833,7 @@ export const GoatsListPage: React.FC = () => {
                   <div className="p-4 pt-5">
                     <div className="flex items-center justify-between gap-3 mb-3">
                       <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="shrink-0 text-xs font-semibold text-muted-foreground tabular-nums">{idx + 1}.</span>
                         <h3 className={`text-base font-bold truncate ${goat.status === 'sold' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground'}`}>
                           {goat.earTagNumber}
                         </h3>
@@ -858,6 +845,9 @@ export const GoatsListPage: React.FC = () => {
                             : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
                         }`}>
                           {goat.status}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground">
+                          {formatEntryDate(goat.purchaseDate)}
                         </span>
                       </div>
                       <div className="flex gap-2">
