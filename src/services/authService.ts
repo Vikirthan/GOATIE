@@ -259,9 +259,14 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
       callback(null);
     }
   } else if (isSupabaseEnabled()) {
-    // Initial fetch of current user
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    // Initial fetch of current user — read the locally cached session (no network
+    // round-trip) so the app isn't blocked waiting on a server call before it can
+    // render. Supabase verifies/refreshes the token in the background as needed,
+    // and onAuthStateChange below will correct `callback` if the session turns out
+    // to be invalid.
+    supabase.auth.getSession().then(({ data: { session } }) => {
       if (localStorage.getItem('goatie_logged_in_user')) return;
+      const user = session?.user;
       if (user) {
         callback({
           id: user.id,
