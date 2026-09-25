@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { showToast } from '@/components/common/Toast';
+import { HerdSwitcher } from '@/components/common/HerdSwitcher';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   recordVaccination,
@@ -92,7 +93,7 @@ const GoatSearchDropdown = ({
 export const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, herdIds, viewingHerdId, isWritable, readOnlyView } = useAuth();
   const queryClient = useQueryClient();
   const { data: queryData, isLoading: queryLoading, refetch } = useDashboardData(user?.id);
   const [submitting, setSubmitting] = useState(false);
@@ -114,6 +115,11 @@ export const DashboardPage: React.FC = () => {
   const dewormingRef = useRef<HTMLDivElement>(null);
   const weightRef = useRef<HTMLDivElement>(null);
   const saleRef = useRef<HTMLDivElement>(null);
+
+  // Local IndexedDB snapshot is only an instant first paint — once network
+  // data has been applied it must never overwrite it (herdIds resolving late
+  // re-runs the local load; same guard as GoatsListPage).
+  const networkDataAppliedRef = useRef(false);
 
   const [vaccineSearch, setVaccineSearch] = useState('');
   const [showVaccineDropdown, setShowVaccineDropdown] = useState(false);
@@ -244,7 +250,14 @@ export const DashboardPage: React.FC = () => {
       try {
         const localGoats = await indexedDB.getAllItems<Goat>('goats');
         const localWeights = await indexedDB.getAllItems<WeightRecord>('weights');
-        const farmerGoats = localGoats.filter((g) => g.farmerId === user.id);
+        // Herd-aware offline snapshot: own herd + assigned herds (+ all herds
+        // for admins). herdIds is empty only for a beat at startup — fall back
+        // to own id meanwhile. A picked viewing herd narrows the snapshot.
+        const scope = new Set(
+          viewingHerdId ? [viewingHerdId] : herdIds.length > 0 ? herdIds : [user.id],
+        );
+        if (networkDataAppliedRef.current) return;
+        const farmerGoats = localGoats.filter((g) => scope.has(g.farmerId));
         
         if (farmerGoats.length > 0) {
           const localActive = farmerGoats.filter((g) => g.status === 'active');
@@ -296,14 +309,26 @@ export const DashboardPage: React.FC = () => {
       }
     };
     loadLocalData();
-  }, [user]);
+  }, [user, herdIds, viewingHerdId]);
 
   // 2. Network Data Sync (React Query)
   useEffect(() => {
     if (queryLoading || !queryData || !user) return;
     
     try {
-      const { allGoats, weightDue, deworm, vacc, freshWeights } = queryData;
+      const scoped = viewingHerdId
+        ? {
+            allGoats: queryData.allGoats.filter((g) => g.farmerId === viewingHerdId),
+            weightDue: queryData.weightDue.filter((w) => w.goat.farmerId === viewingHerdId),
+            deworm: queryData.deworm.filter((g) => g.farmerId === viewingHerdId),
+            vacc: queryData.vacc.filter((g) => g.farmerId === viewingHerdId),
+            freshWeights: queryData.freshWeights.filter((w) =>
+              queryData.allGoats.some((g) => g.id === w.goatId && g.farmerId === viewingHerdId),
+            ),
+          }
+        : queryData;
+      const { allGoats, weightDue, deworm, vacc, freshWeights } = scoped;
+      networkDataAppliedRef.current = true;
       const freshActive = allGoats.filter((g) => g.status === 'active');
       const freshSold = allGoats.filter((g) => g.status === 'sold');
       const freshDead = allGoats.filter((g) => g.status === 'deceased');
@@ -355,7 +380,7 @@ export const DashboardPage: React.FC = () => {
     } catch (error) {
       console.error('Error processing network dashboard data:', error);
     }
-  }, [queryData, queryLoading, user]);
+  }, [queryData, queryLoading, user, viewingHerdId]);
 
   const handleHardReload = async () => {
     try {
@@ -461,6 +486,10 @@ export const DashboardPage: React.FC = () => {
   const handleWeightSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!weightForm.goatId) { showToast('error', 'Please select a goat'); return; }
+    if (!isWritable(goatsList.find((g) => g.id === weightForm.goatId)?.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot record into it.');
+      return;
+    }
     const parsedWeight = parseFloat(weightForm.weight);
     if (isNaN(parsedWeight) || parsedWeight <= 0) { showToast('error', 'Please enter a valid weight'); return; }
     setSubmitting(true);
@@ -507,6 +536,10 @@ export const DashboardPage: React.FC = () => {
   const handleVaccineSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!vaccineForm.goatId) { showToast('error', 'Please search and select a valid goat'); return; }
+    if (!isWritable(goatsList.find((g) => g.id === vaccineForm.goatId)?.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot record into it.');
+      return;
+    }
     setSubmitting(true);
     try {
       await recordVaccination(vaccineForm.goatId, {
@@ -527,6 +560,10 @@ export const DashboardPage: React.FC = () => {
   const handleDewormingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dewormingForm.goatId) { showToast('error', 'Please search and select a valid goat'); return; }
+    if (!isWritable(goatsList.find((g) => g.id === dewormingForm.goatId)?.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot record into it.');
+      return;
+    }
     setSubmitting(true);
     try {
       await recordDeworming(dewormingForm.goatId, {
@@ -550,6 +587,10 @@ export const DashboardPage: React.FC = () => {
     if (!saleForm.goatId) { showToast('error', 'Please select a goat'); return; }
     const selectedGoat = goatsList.find((g) => g.id === saleForm.goatId);
     if (!selectedGoat) return;
+    if (!isWritable(selectedGoat.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot record into it.');
+      return;
+    }
 
     const saleWeight = parseFloat(saleForm.saleWeight);
     const saleRatePerKg = parseFloat(saleForm.saleRatePerKg);
@@ -634,16 +675,24 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="space-y-6 relative">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Welcome back, <span className="font-medium text-foreground">{user?.displayName}</span></p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleHardReload} className="gap-2">
-          <RefreshCw className="h-4 w-4" />
-          Hard Refresh
-        </Button>
+        <div className="flex items-end gap-2 flex-wrap">
+          <HerdSwitcher />
+          <Button variant="outline" size="sm" onClick={handleHardReload} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Hard Refresh
+          </Button>
+        </div>
       </div>
+      {readOnlyView && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+          Viewing another herd — read-only. Recording, sales, and edits are disabled here.
+        </div>
+      )}
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Quick Actions</h2>
@@ -654,22 +703,22 @@ export const DashboardPage: React.FC = () => {
               setWeightGoatSearch('');
               setWeightForm({ goatId: '', weightNumber: '1', weight: '', recordedDate: new Date().toISOString().split('T')[0] });
               setShowWeightModal(true);
-            }, disabled: goatsList.length === 0 },
+            }, disabled: goatsList.length === 0 || readOnlyView },
             { label: 'Log Vaccine', icon: <Syringe className="h-5 w-5" />, color: 'bg-violet-500 hover:bg-violet-600 text-white', action: () => {
               setVaccineSearch('');
               setVaccineForm({ goatId: '', vaccinationDate: new Date().toISOString().split('T')[0] });
               setShowVaccineModal(true);
-            }, disabled: goatsList.length === 0 },
+            }, disabled: goatsList.length === 0 || readOnlyView },
             { label: 'Log Deworming', icon: <Bug className="h-5 w-5" />, color: 'bg-blue-500 hover:bg-blue-600 text-white', action: () => {
               setDewormingSearch('');
               setDewormingForm({ goatId: '', dewormingDate: new Date().toISOString().split('T')[0] });
               setShowDewormingModal(true);
-            }, disabled: goatsList.length === 0 },
+            }, disabled: goatsList.length === 0 || readOnlyView },
             { label: 'Sell Goat', icon: <ShoppingCart className="h-5 w-5" />, color: 'bg-amber-500 hover:bg-amber-600 text-white', action: () => {
               setSaleGoatSearch('');
               setSaleForm({ goatId: '', saleDate: new Date().toISOString().split('T')[0], saleWeight: '', saleRatePerKg: '', saleTotalPrice: '', remarks: '' });
               setShowSaleModal(true);
-            }, disabled: goatsList.length === 0 },
+            }, disabled: goatsList.length === 0 || readOnlyView },
             { label: 'View All Goats', icon: <List className="h-5 w-5" />, color: 'bg-slate-600 hover:bg-slate-700 text-white', action: () => navigate('/goats') },
           ].map(({ label, icon, color, action, disabled }) => (
             <button
