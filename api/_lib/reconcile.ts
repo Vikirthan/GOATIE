@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { buildGoatRow, buildWeightRow, buildDewormRow, buildVaccRow, ReconRow } from './rows';
+import { buildGoatRow, buildWeightRow, buildDewormRow, buildVaccRow, ReconRow } from './rows.js';
 
 const SHEETS_WEBAPP_URL = process.env.GOOGLE_SHEETS_BACKUP_WEBAPP_URL || '';
 const SHEETS_SECRET = process.env.GOOGLE_SHEETS_BACKUP_SECRET || '';

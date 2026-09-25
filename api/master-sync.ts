@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { reconcileAllTabs, readAllTabs, currentMonthKey } from './_lib/reconcile';
+import { reconcileAllTabs, readAllTabs, currentMonthKey } from './_lib/reconcile.js';
 
 // Master Sheets sync endpoint. All secrets stay server-side (plain env, never
 // VITE_-prefixed): the browser calls this same-origin route, and only this

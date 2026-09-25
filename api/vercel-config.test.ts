@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
 // Guards the deployment contract: SPA fallback must never swallow /api, the
@@ -36,8 +36,10 @@ describe('vercel.json', () => {
 });
 
 describe('api/ bundler safety', () => {
-  // Vercel bundles functions without the Vite `@/` alias: any `@/` or
-  // `../src` import crashes the function at load (FUNCTION_INVOCATION_FAILED).
+  // Functions ship as ESM (repo root is `"type": "module"`). Node ESM has no
+  // extension searching, so every relative import must carry its explicit
+  // `.js` extension, and nothing may import `@/` or `../src` (the Vite-only
+  // alias). Violations crash the function at load (FUNCTION_INVOCATION_FAILED).
   const sources = [
     'master-sync.ts',
     '_lib/reconcile.ts',
@@ -50,13 +52,18 @@ describe('api/ bundler safety', () => {
       expect(src).not.toMatch(/from ['"]@\//);
       expect(src).not.toMatch(/from ['"]\.\.\/(\.\.\/)*src\//);
     });
+
+    it(`${file} uses explicit .js extensions on relative imports`, () => {
+      const relatives = [...src.matchAll(/from (['"])(\.[^'"]*)\1/g)].map((m) => m[2]);
+      for (const spec of relatives) {
+        expect(spec.endsWith('.js')).toBe(true);
+      }
+    });
   }
 
-  it('api/ pins CommonJS so functions load regardless of root type', () => {
-    // The builder compiles functions to CommonJS; with the repo root on
-    // `"type": "module"`, Node would otherwise load the emitted .js as ESM
-    // and crash at boot (FUNCTION_INVOCATION_FAILED). Do not delete this file.
-    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { type?: string };
-    expect(pkg.type).toBe('commonjs');
+  it('api/ has no nested package.json fighting the root module type', () => {
+    // A nested `{"type": "commonjs"}` would force Node to parse the ESM
+    // output as CJS and crash at boot. The root `"type": "module"` governs.
+    expect(existsSync(join(dir, 'package.json'))).toBe(false);
   });
 });
