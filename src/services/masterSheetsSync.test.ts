@@ -65,6 +65,28 @@ describe('triggerMasterSync', () => {
     const res = await triggerMasterSync();
     expect(res.ok).toBe(false);
   });
+
+  it('prefers the server’s JSON error over the bare HTTP status', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(
+      { ok: false, error: 'Master Sheets not configured on the server — set FOO.' },
+      false,
+      500,
+    ) as unknown as Response);
+    const res = await triggerMasterSync();
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('not configured') });
+  });
+
+  it('falls back to the HTTP status for non-JSON error pages', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => {
+        throw new Error('Unexpected token <');
+      },
+    } as unknown as Response);
+    const res = await triggerMasterSync();
+    expect(res).toMatchObject({ ok: false, error: 'Server returned HTTP 500' });
+  });
 });
 
 describe('fetchMasterSyncStatus', () => {

@@ -49,8 +49,16 @@ async function callApi<T>(url: string, init?: RequestInit, timeoutMs = 120000): 
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
-    return (await res.json()) as T;
+    // Read the body first: error responses carry the actionable message
+    // ({ ok: false, error }) — surfacing bare HTTP codes hides the cause.
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      // non-JSON error page (route missing, proxy failure, …)
+    }
+    if (!res.ok) throw new Error(data?.error || `Server returned HTTP ${res.status}`);
+    return data as T;
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new Error('Timed out waiting for the server — the push may still complete; check the timestamp and retry');
