@@ -9,6 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 import { showToast } from '@/components/common/Toast';
 import {
   fetchMasterSyncStatus,
+  resolveLastSyncAt,
   restoreFromSheets,
   restoreToDatabase,
   triggerMasterSync,
@@ -74,7 +75,7 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
       );
       try {
         const status = await fetchMasterSyncStatus();
-        setSheetsMeta({ lastSyncAt: status.lastSyncAt, rewriteMonth: status.rewriteMonth });
+        setSheetsMeta({ lastSyncAt: resolveLastSyncAt(status, result), rewriteMonth: status.rewriteMonth });
       } catch {
         if (result.ranAt) setSheetsMeta((m) => ({ ...m, lastSyncAt: result.ranAt ?? m.lastSyncAt }));
       }

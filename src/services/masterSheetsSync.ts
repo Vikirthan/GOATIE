@@ -43,6 +43,19 @@ export interface MasterSyncStatus {
   lastResult: TabSyncResult[] | null;
 }
 
+/**
+ * Resolve the timestamp to display after a push. The server value is
+ * cross-device; when the server has none yet (e.g. the master_sync_state
+ * table was never created), fall back to this push's own time so the UI
+ * still reflects reality on this device.
+ */
+export function resolveLastSyncAt(
+  status: Pick<MasterSyncStatus, 'lastSyncAt'> | null,
+  result: { ranAt?: number },
+): number | null {
+  return status?.lastSyncAt ?? result.ranAt ?? null;
+}
+
 /** Same-origin API call with a generous timeout (a full herd push can run long). */
 async function callApi<T>(url: string, init?: RequestInit, timeoutMs = 120000): Promise<T> {
   const controller = new AbortController();

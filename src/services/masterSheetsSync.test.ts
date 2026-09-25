@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchMasterSyncStatus,
   needsDailyPush,
+  resolveLastSyncAt,
   restoreFromSheets,
   restoreToDatabase,
   triggerMasterSync,
@@ -32,6 +33,21 @@ describe('needsDailyPush', () => {
     expect(needsDailyPush(new Date(2026, 8, 24, 23, 59).getTime(), new Date(2026, 8, 25, 0, 1))).toBe(true);
     expect(needsDailyPush(new Date(2026, 7, 31).getTime(), new Date(2026, 8, 1))).toBe(true);
     expect(needsDailyPush(new Date(2025, 11, 31).getTime(), new Date(2026, 0, 1))).toBe(true);
+  });
+});
+
+describe('resolveLastSyncAt', () => {
+  it('prefers the cross-device server timestamp', () => {
+    expect(resolveLastSyncAt({ lastSyncAt: 100 }, { ranAt: 200 })).toBe(100);
+  });
+
+  it('falls back to the push time when the server has none yet', () => {
+    expect(resolveLastSyncAt({ lastSyncAt: null }, { ranAt: 200 })).toBe(200);
+    expect(resolveLastSyncAt(null, { ranAt: 200 })).toBe(200);
+  });
+
+  it('stays null when neither side has a timestamp', () => {
+    expect(resolveLastSyncAt({ lastSyncAt: null }, {})).toBeNull();
   });
 });
 

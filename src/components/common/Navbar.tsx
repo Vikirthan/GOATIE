@@ -11,6 +11,7 @@ import { format } from 'date-fns';
 import {
   fetchMasterSyncStatus,
   needsDailyPush,
+  resolveLastSyncAt,
   triggerMasterSync,
 } from '@/services/masterSheetsSync';
 
@@ -64,7 +65,7 @@ export const Navbar: React.FC = () => {
       );
       try {
         const status = await fetchMasterSyncStatus();
-        setLastSyncAt(status.lastSyncAt);
+        setLastSyncAt(resolveLastSyncAt(status, result));
       } catch {
         if (result.ranAt) setLastSyncAt(result.ranAt);
       }
