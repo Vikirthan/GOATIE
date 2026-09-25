@@ -214,7 +214,14 @@ export async function reconcileAllTabs(): Promise<{ summary: ReconSummary[]; ful
   const fullRewrite = isFullRewriteRun();
 
   const summaries: ReconSummary[] = [];
-  for (const tab of tabs) {
+  // Daily verify: read all tabs up front in parallel (reads don't lock), then
+  // reconcile sequentially — concurrent writes trip the script's busy lock.
+  // This keeps first pushes inside serverless time limits.
+  const existingByTab = fullRewrite
+    ? []
+    : await Promise.all(tabs.map((tab) => callSheet('read', tab.name)));
+  for (let ti = 0; ti < tabs.length; ti++) {
+    const tab = tabs[ti];
     if (fullRewrite) {
       let added = 0;
       let deleted = 0;
@@ -236,7 +243,7 @@ export async function reconcileAllTabs(): Promise<{ summary: ReconSummary[]; ful
       continue;
     }
 
-    const existing = await callSheet('read', tab.name);
+    const existing = existingByTab[ti] as ReconRow[];
     const { toAdd, toUpdate, toDeleteIds } = computeReconOps(tab.rows, existing);
     if (toAdd.length || toUpdate.length || toDeleteIds.length) {
       await callSheet('reconcile', tab.name, { toAdd, toUpdate, toDeleteIds });
