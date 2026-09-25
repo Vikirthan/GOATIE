@@ -10,6 +10,7 @@ import { InstallPrompt } from '@/components/common/InstallPrompt';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
 import { AdminPage } from '@/pages/AdminPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { GoatRegistrationPage } from '@/pages/GoatRegistrationPage';
 import { GoatsListPage } from '@/pages/GoatsListPage';
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
                         <Route path="/goats/register" element={<GoatRegistrationPage />} />
                         <Route path="/goats/:id" element={<GoatDetailPage />} />
                         <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+                        <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
                         <Route path="*" element={<NotFoundPage />} />
                       </Routes>
