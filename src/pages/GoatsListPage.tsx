@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/Label';
 import { exportGoatsToExcel, importFullExcelData } from '@/utils/excelHelper';
 import { generateQRCode, generateBarcode } from '@/utils/helpers';
 import { showToast } from '@/components/common/Toast';
+import { HerdSwitcher } from '@/components/common/HerdSwitcher';
 import { format } from 'date-fns';
 
 const formatEntryDate = (date: Date | string | undefined): string => {
@@ -94,7 +95,7 @@ const PaginationControls: React.FC<{ page: number; totalPages: number; onPageCha
 export const GoatsListPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, herdIds, activeHerdId, viewingHerdId, isWritable, readOnlyView } = useAuth();
   const { data: queryData, isLoading: queryLoading, refetch } = useGoatsData(user?.id);
   const loadGoatsList = (silent = false) => {
     if (!silent) setLoading(true);
@@ -167,6 +168,11 @@ export const GoatsListPage: React.FC = () => {
 
   const handleDeleteGoat = async (e: React.MouseEvent, goatId: string) => {
     e.stopPropagation();
+    const target = goats.find((g) => g.id === goatId);
+    if (target && !isWritable(target.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot change it.');
+      return;
+    }
     if (!window.confirm('Are you sure you want to delete this goat entry? This cannot be undone.')) return;
     try {
       await deleteGoat(goatId);
@@ -179,6 +185,10 @@ export const GoatsListPage: React.FC = () => {
 
   const handleEditClick = (e: React.MouseEvent, goat: Goat) => {
     e.stopPropagation();
+    if (!isWritable(goat.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot change it.');
+      return;
+    }
     setEditingGoat(goat);
     setEditForm({
       earTagNumber: goat.earTagNumber || '',
@@ -194,6 +204,10 @@ export const GoatsListPage: React.FC = () => {
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingGoat) return;
+    if (!isWritable(editingGoat.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot change it.');
+      return;
+    }
     try {
       const weight = parseFloat(editForm.purchaseWeight);
       const price = parseFloat(editForm.purchasePrice);
@@ -237,8 +251,9 @@ export const GoatsListPage: React.FC = () => {
     const loadLocalData = async () => {
       try {
         const localGoats = await indexedDB.getAllItems<Goat>('goats');
+        const scope = new Set(herdIds.length > 0 ? herdIds : [user.id]);
         const filteredLocal = localGoats
-          .filter((g) => g.farmerId === user.id)
+          .filter((g) => scope.has(g.farmerId))
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         const localDeworm = await indexedDB.getAllItems<DewormingRecord>('deworming');
         const localVacc = await indexedDB.getAllItems<PPRVaccinationRecord>('vaccination');
@@ -256,7 +271,7 @@ export const GoatsListPage: React.FC = () => {
       }
     };
     loadLocalData();
-  }, [user]);
+  }, [user, herdIds]);
 
   // 2. Network Data Sync (React Query)
   useEffect(() => {
@@ -294,6 +309,7 @@ export const GoatsListPage: React.FC = () => {
   useEffect(() => {
     const sortDate = (g: Goat) => new Date(getDisplayDate(g, filter) ?? g.purchaseDate).getTime();
     let result = [...goats].sort((a, b) => sortDate(b) - sortDate(a));
+    if (viewingHerdId) result = result.filter((g) => g.farmerId === viewingHerdId);
     if (filter !== 'all') result = result.filter((g) => g.status === filter);
     if (variantFilter !== 'all') result = result.filter((g) => String(g.variant || '').toUpperCase() === variantFilter);
     if (searchTerm) {
@@ -350,7 +366,7 @@ export const GoatsListPage: React.FC = () => {
     }
     setFilteredGoats(result);
     setPage(0);
-  }, [goats, searchTerm, filter, variantFilter, weightMin, weightMax, weightGainMin, weightGainMax, latestWeightMap, weightRecords]);
+  }, [goats, searchTerm, filter, variantFilter, weightMin, weightMax, weightGainMin, weightGainMax, latestWeightMap, weightRecords, viewingHerdId]);
 
   const totalPages = Math.max(1, Math.ceil(filteredGoats.length / PAGE_SIZE));
   const paginatedGoats = filteredGoats.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -398,7 +414,9 @@ export const GoatsListPage: React.FC = () => {
       const earTagToId = new Map<string, string>();
 
       for (const pg of parsedGoats) {
-        const existing = await getGoatByEarTag(user.id, pg.earTagNumber);
+        // Excel imports land in the active herd (own herd by default).
+        const herdId = activeHerdId ?? user.id;
+        const existing = await getGoatByEarTag(herdId, pg.earTagNumber);
         if (existing) {
           earTagToId.set(pg.earTagNumber, existing.id);
           goatsSkipped++;
@@ -408,7 +426,7 @@ export const GoatsListPage: React.FC = () => {
         const qrCode = await generateQRCode(pg.earTagNumber);
         const barcode = generateBarcode(pg.earTagNumber);
 
-        const goatId = await createGoat(user.id, {
+        const goatId = await createGoat(herdId, {
           earTagNumber: pg.earTagNumber,
           purchaseDate: pg.purchaseDate,
           purchaseWeight: pg.purchaseWeight,
@@ -539,7 +557,8 @@ export const GoatsListPage: React.FC = () => {
           <h1 className="text-3xl font-bold tracking-tight">My Goats</h1>
           <p className="text-muted-foreground mt-1">Manage your goat inventory · {goats.length} total</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-end">
+          <HerdSwitcher />
           <Button
             variant="outline"
             size="sm"
@@ -572,12 +591,18 @@ export const GoatsListPage: React.FC = () => {
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center gap-2"
             isLoading={importing}
-            disabled={loading || importing}
+            disabled={loading || importing || readOnlyView}
+            title={readOnlyView ? 'Switch to a writable herd to import' : undefined}
           >
             <Upload className="h-4 w-4" /> Import
           </Button>
         </div>
       </div>
+      {readOnlyView && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+          Viewing another herd — read-only. Edits, deletes, and imports into this view are disabled (imports always land in your active writable herd).
+        </div>
+      )}
 
       {/* Search and Filter */}
       <div className="flex flex-col gap-3">
@@ -799,15 +824,17 @@ export const GoatsListPage: React.FC = () => {
                         <td className="px-4 py-3.5 text-center whitespace-nowrap">
                           <button
                             onClick={(e) => handleEditClick(e, goat)}
-                            className="inline-flex items-center justify-center h-8 w-8 mr-2 rounded-lg text-blue-500 hover:text-white hover:bg-blue-500 dark:hover:bg-blue-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                            title="Edit goat"
+                            disabled={!isWritable(goat.farmerId)}
+                            className="inline-flex items-center justify-center h-8 w-8 mr-2 rounded-lg text-blue-500 hover:text-white hover:bg-blue-500 dark:hover:bg-blue-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-30 disabled:pointer-events-none"
+                            title={isWritable(goat.farmerId) ? 'Edit goat' : 'View-only herd'}
                           >
                             <Edit2 className="h-4 w-4" />
                           </button>
                           <button
                             onClick={(e) => handleDeleteGoat(e, goat.id)}
-                            className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 hover:text-white hover:bg-red-500 dark:hover:bg-red-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-red-400"
-                            title="Delete goat"
+                            disabled={!isWritable(goat.farmerId)}
+                            className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 hover:text-white hover:bg-red-500 dark:hover:bg-red-600 transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:opacity-30 disabled:pointer-events-none"
+                            title={isWritable(goat.farmerId) ? 'Delete goat' : 'View-only herd'}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -861,15 +888,17 @@ export const GoatsListPage: React.FC = () => {
                       <div className="flex gap-2">
                         <button
                           onClick={(e) => handleEditClick(e, goat)}
-                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-500 hover:text-white dark:bg-blue-950/30 dark:hover:bg-blue-600 transition-all duration-150"
-                          title="Edit goat"
+                          disabled={!isWritable(goat.farmerId)}
+                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-blue-500 bg-blue-50 hover:bg-blue-500 hover:text-white dark:bg-blue-950/30 dark:hover:bg-blue-600 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none"
+                          title={isWritable(goat.farmerId) ? 'Edit goat' : 'View-only herd'}
                         >
                           <Edit2 className="h-4 w-4" />
                         </button>
                         <button
                           onClick={(e) => handleDeleteGoat(e, goat.id)}
-                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white dark:bg-red-950/30 dark:hover:bg-red-600 transition-all duration-150"
-                          title="Delete goat"
+                          disabled={!isWritable(goat.farmerId)}
+                          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-red-500 bg-red-50 hover:bg-red-500 hover:text-white dark:bg-red-950/30 dark:hover:bg-red-600 transition-all duration-150 disabled:opacity-30 disabled:pointer-events-none"
+                          title={isWritable(goat.farmerId) ? 'Delete goat' : 'View-only herd'}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>

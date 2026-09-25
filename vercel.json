@@ -1,14 +1,14 @@
 {
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],
   "crons": [
     {
-      "path": "/api/recon-sheets",
-      "schedule": "29 18 * * 0"
+      "path": "/api/master-sync?run=1",
+      "schedule": "0 2 * * *"
     }
   ]
 }

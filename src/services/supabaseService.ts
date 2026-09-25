@@ -1,7 +1,85 @@
 import { supabase } from '@/lib/supabase';
 import * as indexedDB from '@/lib/indexeddb';
-import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction, SyncHistoryItem } from '@/types';
+import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction, SyncHistoryItem, HerdMembership } from '@/types';
 import { generateId } from '@/utils/helpers';
+
+// ─── Shared herds ────────────────────────────────────────────────────────────
+// A herd is anchored by the original owner's user id (goats.farmer_id).
+// A login sees goats in every herd they own or are assigned to via
+// herd_members. Memberships are cached in IndexedDB so offline mode can
+// resolve herd scope without the server.
+
+export interface HerdScope {
+  /** Every visible herd anchor: own id + member herds (+ all herds for admins). */
+  herdIds: string[];
+  /** Herds the login may write to: own id + herds with their membership row. */
+  writableHerdIds: string[];
+}
+
+export async function getHerdScope(userId: string): Promise<HerdScope> {
+  const visible = new Set<string>([userId]);
+  const writable = new Set<string>([userId]);
+
+  if (typeof navigator !== 'undefined' && navigator.onLine) {
+    try {
+      // No .eq filter: RLS scopes this to the caller's own rows for farmers
+      // and to every row for admins — so admins automatically see all herds.
+      const { data, error } = await supabase
+        .from('herd_members')
+        .select('herd_id,user_id');
+      if (!error && data) {
+        const freshMine = new Set<string>();
+        for (const r of data as { herd_id: string; user_id: string }[]) {
+          const hid = String(r.herd_id);
+          visible.add(hid);
+          if (String(r.user_id) === userId) {
+            freshMine.add(hid);
+            writable.add(hid);
+          }
+        }
+        // Refresh the offline cache with OWN rows only: caching other users'
+        // rows would let them overwrite mine under the shared herd-id key.
+        try {
+          for (const hid of freshMine) {
+            await indexedDB.updateItem('memberships', {
+              id: hid,
+              userId,
+              cachedAt: new Date(),
+            } as HerdMembership);
+          }
+          const cached = await indexedDB.getAllItems<HerdMembership>('memberships');
+          for (const m of cached) {
+            if (m.userId === userId && !freshMine.has(m.id)) {
+              await indexedDB.deleteItem('memberships', m.id).catch(() => {});
+            }
+          }
+        } catch {
+          // cache failures must never break online fetch
+        }
+      }
+    } catch {
+      // pre-migration (no table) or network error → fall through to cache
+    }
+  }
+
+  try {
+    const cached = await indexedDB.getAllItems<HerdMembership>('memberships');
+    for (const m of cached) {
+      if (m.userId === userId) {
+        visible.add(m.id);
+        writable.add(m.id);
+      }
+    }
+  } catch {
+    // no cache yet
+  }
+
+  return { herdIds: [...visible], writableHerdIds: [...writable] };
+}
+
+export async function getMyHerdIds(userId: string): Promise<string[]> {
+  return (await getHerdScope(userId)).herdIds;
+}
 
 // Helper: Convert camelCase properties to snake_case for PostgreSQL insertion/update
 export function camelToSnake(obj: any): any {
@@ -267,10 +345,14 @@ export async function getGoatByEarTag(farmerId: string, earTagNumber: string): P
   }
 }
 
-export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
+export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold' | 'deceased'): Promise<Goat[]> {
+  // Herd-aware: farmerId here is the login; the visible set is every herd the
+  // login owns or is assigned to (resolved via cache when offline).
+  const herdIds = await getMyHerdIds(farmerId);
   let query = supabase
     .from('goats')
-    .select('*, sales(*)');
+    .select('*, sales(*)')
+    .in('farmer_id', herdIds);
   if (status) {
     query = query.eq('status', status);
   }
@@ -279,12 +361,91 @@ export async function getFarmerGoats(_farmerId: string, status?: 'active' | 'sol
   
   const goats = (data || []).map(mapGoatData);
   
-  // Sync down to local DB so offline mode has the latest data
+  // Sync down to local DB so offline mode has the latest data.
+  // Then adopt-then-prune: demo-era local rows ('RKT'/'VIKI') that never
+  // reached Supabase are pushed into the login's own herd (ear-tag deduped
+  // against the server so nothing duplicates); anything still outside the
+  // herd set afterwards is pruned so offline fallbacks can't leak herds the
+  // login no longer belongs to.
   if (navigator.onLine) {
     Promise.all(goats.map(g => indexedDB.updateItem('goats', g))).catch(e => console.error('Failed to sync goats to local DB:', e));
+    try {
+      await adoptLegacyLocalRows(farmerId, goats);
+    } catch (e) {
+      console.error('Legacy herd adoption failed (will retry next sync):', e);
+    }
+    const allowed = new Set(herdIds);
+    indexedDB.getAllItems<Goat>('goats').then((local) => {
+      for (const g of local) {
+        if (!allowed.has(g.farmerId)) {
+          indexedDB.deleteItem('goats', g.id).catch(() => {});
+        }
+      }
+    }).catch(() => {});
   }
   
   return goats;
+}
+
+// One-time demo-era recovery. Rows created under the old text ids never
+// reached Supabase (uuid column rejects them) and live only in the device's
+// IndexedDB. On login, push the login's OWN legacy rows into their herd —
+// matched by the known email→tag mapping so one farmer can never adopt the
+// other's orphans. Safe to remove once both herds are verified in Supabase.
+const LEGACY_TAG_BY_EMAIL: Record<string, string> = {
+  'rkte4e@gmail.com': 'RKT',
+  'vikirthan06@gmail.com': 'VIKI',
+};
+
+async function adoptLegacyLocalRows(userId: string, serverGoats: Goat[]): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const tag = user?.email ? LEGACY_TAG_BY_EMAIL[user.email.toLowerCase()] : undefined;
+  if (!tag) return;
+
+  const local = await indexedDB.getAllItems<Goat>('goats');
+  const orphans = local.filter((g) => g.farmerId === tag);
+  if (orphans.length === 0) return;
+
+  console.log(`Adopting ${orphans.length} legacy '${tag}' rows into herd ${userId}`);
+  const takenTags = new Set(serverGoats.map((g) => g.earTagNumber.toLowerCase()));
+  const [localWeights, localDeworm, localVacc] = await Promise.all([
+    indexedDB.getAllItems<WeightRecord>('weights'),
+    indexedDB.getAllItems<DewormingRecord>('deworming'),
+    indexedDB.getAllItems<PPRVaccinationRecord>('vaccination'),
+  ]);
+
+  for (const o of orphans) {
+    // Ear tag already on the server → stale duplicate, drop the local copy.
+    if (takenTags.has(o.earTagNumber.toLowerCase())) {
+      await indexedDB.deleteItem('goats', o.id).catch(() => {});
+      continue;
+    }
+    const goat: Goat = { ...o, farmerId: userId, updatedAt: new Date() };
+    const { error: gErr } = await supabase.from('goats').insert(camelToSnake(goat));
+    if (gErr) throw gErr;
+    const weights = localWeights.filter((w) => w.goatId === o.id);
+    if (weights.length) {
+      const { error } = await supabase.from('weights').insert(camelToSnake(weights));
+      if (error) throw error;
+    }
+    const deworm = localDeworm.filter((d) => d.goatId === o.id);
+    for (const d of deworm) {
+      const { error } = await supabase.from('deworming').insert(camelToSnake(d));
+      if (error) throw error;
+    }
+    const vacc = localVacc.filter((v) => v.goatId === o.id);
+    for (const v of vacc) {
+      const { error } = await supabase.from('vaccinations').insert(camelToSnake(v));
+      if (error) throw error;
+    }
+    if (goat.status === 'sold' && goat.saleInfo) {
+      const { error } = await supabase.from('sales').insert(camelToSnake(goat.saleInfo));
+      if (error) throw error;
+    }
+    await indexedDB.updateItem('goats', goat);
+    takenTags.add(o.earTagNumber.toLowerCase());
+    console.log(`Adopted legacy goat ${o.earTagNumber}`);
+  }
 }
 
 export async function deleteGoat(goatId: string): Promise<void> {
@@ -541,6 +702,9 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
 }
 
 // ─── Reports and Notifications ───────────────────────────────────────────────
+// NOTE: no explicit farmer_id filter here — RLS scopes these to the caller's
+// own goats (child tables check goats.farmer_id = auth.uid() via goat_id).
+// Callers only ever pass goats already filtered by getFarmerGoats(userId).
 
 export async function getAllDeworming(): Promise<DewormingRecord[]> {
   const { data, error } = await supabase
@@ -582,6 +746,36 @@ export async function getAllWeights(): Promise<WeightRecord[]> {
 }
 // ─── Offline Sync ─────────────────────────────────────────────────────────────
 
+// A push that fails RLS/permission (e.g. herd membership revoked while the
+// action sat queued) will never succeed on retry — drop it into history as
+// failed instead of retrying forever.
+function isPermissionError(err: any): boolean {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || err?.error || err || '').toLowerCase();
+  return (
+    code === '42501' ||
+    msg.includes('row-level security') ||
+    msg.includes('permission denied') ||
+    msg.includes('not permitted') ||
+    msg.includes('unauthorized')
+  );
+}
+
+async function dropFailedAction(action: OfflineAction, reason: string): Promise<void> {
+  console.error(`Dropping offline action ${action.id}: ${reason}`);
+  await indexedDB.deleteItem('offlineQueue', action.id).catch(() => {});
+  const historyItem: SyncHistoryItem = {
+    id: generateId(),
+    actionId: action.id,
+    description: `Failed (no access — dropped): ${action.collection} ${action.type}`,
+    syncedAt: new Date(),
+  };
+  await indexedDB.addItem('syncHistory', historyItem as any).catch(() => {});
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('data-synced'));
+  }
+}
+
 export async function syncOfflineActions() {
   if (!navigator.onLine) return;
   
@@ -592,6 +786,13 @@ export async function syncOfflineActions() {
     console.log(`Syncing ${actions.length} offline actions...`);
     
     for (const action of actions) {
+      // Drop stale pre-migration queue entries keyed to demo ids — they can
+      // never pass RLS (farmer_id must be the auth UUID now).
+      const queuedFarmer = action.data?.goat?.farmerId;
+      if (queuedFarmer === 'RKT' || queuedFarmer === 'VIKI') {
+        await indexedDB.deleteItem('offlineQueue', action.id).catch(() => {});
+        continue;
+      }
       if (action.type === 'create' && action.collection === 'goats') {
         const { goat, weights } = action.data;
         
@@ -619,6 +820,7 @@ export async function syncOfflineActions() {
           console.log(`Successfully synced goat ${goat.earTagNumber}`);
         } catch (err) {
           console.error(`Failed to sync offline create action ${action.id}:`, err);
+          if (isPermissionError(err)) await dropFailedAction(action, String((err as any)?.message || err));
         }
       } else if (action.type === 'update' && action.collection === 'goats') {
         const { id, updates } = action.data;
@@ -646,6 +848,7 @@ export async function syncOfflineActions() {
           console.log(`Successfully synced updated goat ${id}`);
         } catch (err) {
           console.error(`Failed to sync offline update action ${action.id}:`, err);
+          if (isPermissionError(err)) await dropFailedAction(action, String((err as any)?.message || err));
         }
       }
     }

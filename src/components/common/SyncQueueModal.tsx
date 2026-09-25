@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, RefreshCw, CheckCircle, Clock } from 'lucide-react';
+import { X, RefreshCw, CheckCircle, Clock, Cloud, Download } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import * as indexedDB from '@/lib/indexeddb';
 import { OfflineAction, SyncHistoryItem } from '@/types';
 import { forceSync } from '@/services/firebaseService';
 import { useAuth } from '@/context/AuthContext';
 import { showToast } from '@/components/common/Toast';
+import {
+  fetchMasterSyncStatus,
+  resolveLastSyncAt,
+  restoreFromSheets,
+  restoreToDatabase,
+  triggerMasterSync,
+} from '@/services/masterSheetsSync';
 
 interface SyncQueueModalProps {
   isOpen: boolean;
@@ -17,7 +24,13 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
   const [pending, setPending] = useState<OfflineAction[]>([]);
   const [history, setHistory] = useState<SyncHistoryItem[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
-  const { user } = useAuth();
+  const { user, activeHerdId } = useAuth();
+  const [verifying, setVerifying] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [sheetsMeta, setSheetsMeta] = useState<{ lastSyncAt: number | null; rewriteMonth: string | null }>({
+    lastSyncAt: null,
+    rewriteMonth: null,
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -29,14 +42,79 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
     try {
       const q = await indexedDB.getAllItems<OfflineAction>('offlineQueue');
       const h = await indexedDB.getAllItems<SyncHistoryItem>('syncHistory');
-      
+
       // Sort history newest first
       h.sort((a, b) => new Date(b.syncedAt).getTime() - new Date(a.syncedAt).getTime());
-      
+
       setPending(q);
       setHistory(h);
     } catch (err) {
       console.error('Failed to load sync queue', err);
+    }
+    try {
+      const status = await fetchMasterSyncStatus();
+      setSheetsMeta({ lastSyncAt: status.lastSyncAt, rewriteMonth: status.rewriteMonth });
+    } catch (err) {
+      console.error('Failed to load master sheets status', err);
+    }
+  };
+
+  // Manual daily-verify push from the modal (same job as Recon Now).
+  const handleVerifySheets = async () => {
+    setVerifying(true);
+    try {
+      const result = await triggerMasterSync();
+      if (!result.ok) throw new Error(result.error || 'Verify failed');
+      const totals = (result.tabs ?? []).reduce(
+        (acc, s) => ({
+          added: acc.added + s.added,
+          updated: acc.updated + s.updated,
+          deleted: acc.deleted + s.deleted,
+        }),
+        { added: 0, updated: 0, deleted: 0 },
+      );
+      try {
+        const status = await fetchMasterSyncStatus();
+        setSheetsMeta({ lastSyncAt: resolveLastSyncAt(status, result), rewriteMonth: status.rewriteMonth });
+      } catch {
+        if (result.ranAt) setSheetsMeta((m) => ({ ...m, lastSyncAt: result.ranAt ?? m.lastSyncAt }));
+      }
+      showToast(
+        'success',
+        result.fullRewrite ? 'Master sheet rewritten!' : 'Master sheet verified!',
+        `+${totals.added} added · ${totals.updated} updated · ${totals.deleted} removed` +
+          (result.fullRewrite ? ' · monthly full rewrite' : ''),
+      );
+    } catch (err) {
+      showToast('error', 'Verify failed', err instanceof Error ? err.message : 'Verify failed');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  // DB-lost recovery: pull all 4 tabs back (incremental — skips ids present).
+  const handleRestore = async () => {
+    if (!user) return;
+    if (!window.confirm('Restore missing records from the Master Sheet into the database? Existing records are kept.')) return;
+    setRestoring(true);
+    try {
+      const fetched = await restoreFromSheets();
+      if (!fetched.ok || !fetched.data) throw new Error(fetched.error || 'Restore failed');
+      // Restored goats are anchored to the active herd (RLS: caller must be a
+      // member of it — enforced server-side on insert).
+      const written = await restoreToDatabase(activeHerdId ?? user.id, fetched.data);
+      if (!written.ok) throw new Error(written.error || 'Restore failed');
+      const a = written.added;
+      window.dispatchEvent(new Event('data-synced'));
+      showToast(
+        'success',
+        'Restore complete!',
+        `+${a.goats} goats · +${a.weights} weights · +${a.dewormings} deworming · +${a.vaccinations} vaccinations · ${written.skipped} already present`,
+      );
+    } catch (err) {
+      showToast('error', 'Restore failed', err instanceof Error ? err.message : 'Restore failed');
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -121,6 +199,49 @@ export function SyncQueueModal({ isOpen, onClose }: SyncQueueModalProps) {
                 ))}
               </ul>
             )}
+          </section>
+
+          {/* Master Sheets backup Section */}
+          <section>
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2 mb-2">
+              <Cloud className="w-5 h-5 text-sky-500" />
+              Master Sheets backup
+            </h3>
+            <p className="text-xs text-muted-foreground mb-4">
+              One master spreadsheet (Goats Data · Monthly Weights · Deworming · Vaccination),
+              verified against the View Goats page every day. Once a month it is erased and
+              re-fetched as new. Restores pull missing records back after DB loss.
+              Credentials live on the server (Vercel env) — nothing to paste here.
+            </p>
+            <div className="space-y-3 p-4 bg-muted/20 rounded-xl border border-border">
+              <div className="text-xs text-muted-foreground">
+                {sheetsMeta.lastSyncAt
+                  ? `Last verify ${new Date(sheetsMeta.lastSyncAt).toLocaleString()}`
+                  : 'Never verified yet'}
+                {sheetsMeta.rewriteMonth ? ` · monthly rewrite ${sheetsMeta.rewriteMonth}` : ''}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={handleVerifySheets}
+                  disabled={verifying}
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2"
+                >
+                  <Cloud className={`w-4 h-4 ${verifying ? 'animate-pulse' : ''}`} />
+                  {verifying ? 'Verifying…' : 'Verify now'}
+                </Button>
+                <Button
+                  onClick={handleRestore}
+                  disabled={restoring}
+                  size="sm"
+                  variant="outline"
+                  className="flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  {restoring ? 'Restoring…' : 'Restore from sheets'}
+                </Button>
+              </div>
+            </div>
           </section>
 
           {/* Sync History Section */}

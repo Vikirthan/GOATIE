@@ -10,6 +10,7 @@ import {
   getAllDewormingForGoat,
 } from '@/services/firebaseService';
 import { Goat, WeightRecord, PPRVaccinationRecord, DewormingRecord } from '@/types';
+import { useAuth } from '@/context/AuthContext';
 
 import { format } from 'date-fns';
 
@@ -85,6 +86,7 @@ const StatusRow: React.FC<{
 export const GoatDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isWritable } = useAuth();
   const [goat, setGoat] = useState<Goat | null>(null);
   const [weights, setWeights] = useState<WeightRecord[]>([]);
   const [vaccinations, setVaccinations] = useState<PPRVaccinationRecord[]>([]);
@@ -173,7 +175,12 @@ export const GoatDetailPage: React.FC = () => {
       </div>
 
       {/* Quick Actions — act on this specific goat without re-searching by ear tag on the Dashboard */}
-      {goat.status === 'active' && (
+      {!isWritable(goat.farmerId) && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+          Viewing another herd — read-only. Recording actions are disabled for this goat.
+        </div>
+      )}
+      {goat.status === 'active' && isWritable(goat.farmerId) && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {[
             { label: 'Record Weight', icon: <Weight className="h-4 w-4" />, modal: 'weight' as const, color: 'bg-cyan-500 hover:bg-cyan-600' },
