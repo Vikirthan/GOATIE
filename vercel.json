@@ -4,6 +4,5 @@
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
-  ],
-  "cronsNote": "Scheduled sync disabled — the app pushes once a day on launch plus manual Recon Now (both via POST /api/master-sync). To re-enable closed-app sync, add a crons entry hitting GET /api/master-sync?run=1 plus CRON_SECRET env (see google-apps-script/master-sync/README.md)."
+  ]
 }
