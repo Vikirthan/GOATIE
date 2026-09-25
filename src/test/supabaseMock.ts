@@ -16,7 +16,8 @@ export type TableHandler =
 
 export interface MockSupabase {
   from: ReturnType<typeof vi.fn>;
-  auth: Record<string, ReturnType<typeof vi.fn>>;
+  // Loose on purpose: tests attach per-test auth namespaces (e.g. auth.admin).
+  auth: Record<string, any>;
   channel: ReturnType<typeof vi.fn>;
   removeChannel: ReturnType<typeof vi.fn>;
   _queries: { table: string; calls: { method: string; args: unknown[] }[] }[];

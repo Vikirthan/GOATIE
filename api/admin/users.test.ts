@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@supabase/supabase-js', async () => {
-  const { getMockSupabase } = await vi.importActual('@/test/supabaseMock');
+  const { getMockSupabase } = await vi.importActual('@/test/supabaseMock') as typeof import('@/test/supabaseMock');
   return { createClient: () => getMockSupabase() };
 });
 

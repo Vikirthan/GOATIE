@@ -10,7 +10,7 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "types": ["vite/client", "vite-plugin-pwa/client"],
+    "types": ["vite/client", "vite-plugin-pwa/client", "node"],
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -27,6 +27,6 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"],
+  "include": ["src", "api", "supabase"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
