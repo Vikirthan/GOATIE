@@ -4,8 +4,8 @@ import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
 import { describe, expect, it } from 'vitest';
 
-// Guards the deployment contract: SPA fallback must never swallow /api, and
-// the closed-app cron must stay wired to the master-sync route.
+// Guards the deployment contract: SPA fallback must never swallow /api, the
+// closed-app cron must stay wired, and api/ must stay bundler-safe.
 const dir = dirname(fileURLToPath(import.meta.url));
 const vercel = JSON.parse(readFileSync(join(dir, '..', 'vercel.json'), 'utf8')) as {
   rewrites?: { source: string; destination: string }[];
@@ -33,4 +33,22 @@ describe('vercel.json', () => {
     expect(cron?.path).toContain('run=1');
     expect(typeof cron?.schedule).toBe('string');
   });
+});
+
+describe('api/ bundler safety', () => {
+  // Vercel bundles functions without the Vite `@/` alias: any `@/` or
+  // `../src` import crashes the function at load (FUNCTION_INVOCATION_FAILED).
+  const sources = [
+    'master-sync.ts',
+    '_lib/reconcile.ts',
+    '_lib/rows.ts',
+    'admin/users.ts',
+  ].map((f) => ({ file: f, src: readFileSync(join(dir, f), 'utf8') }));
+
+  for (const { file, src } of sources) {
+    it(`${file} has no @/ or src/ imports`, () => {
+      expect(src).not.toMatch(/from ['"]@\//);
+      expect(src).not.toMatch(/from ['"]\.\.\/(\.\.\/)*src\//);
+    });
+  }
 });
