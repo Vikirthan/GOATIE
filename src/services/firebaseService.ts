@@ -162,6 +162,10 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
   if (isSupabaseEnabled()) {
     return supabaseService.getFarmerGoats(farmerId, status);
   }
+  // Offline/sheets backends predate shared herds: resolve the herd set first
+  // (membership cache works offline) and filter every branch by it.
+  const herdIds = new Set(await supabaseService.getMyHerdIds(farmerId));
+  const inHerds = (g: Goat) => herdIds.has(g.farmerId);
   // Fetch fresh from Sheets when configured
   if (sheetsService.isSheetsConfigured()) {
     try {
@@ -170,7 +174,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
 
       // Find goats created locally while Sheets was unconfigured/offline
       const unsyncedGoats = localGoats.filter(
-        (lg) => lg.farmerId === farmerId && !freshGoats.some((fg) => fg.id === lg.id)
+        (lg) => inHerds(lg) && !freshGoats.some((fg) => fg.id === lg.id)
       );
 
       if (unsyncedGoats.length > 0) {
@@ -220,7 +224,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
         // Sync UP
         const unsyncedWeights = localWeights.filter(
           (lw) => lw.isRecorded &&
-                  freshGoats.some((g) => g.id === lw.goatId && g.farmerId === farmerId) &&
+                  freshGoats.some((g) => g.id === lw.goatId && inHerds(g)) &&
                   !freshWeights.some((fw) => fw.id === lw.id)
         );
         for (const uw of unsyncedWeights) {
@@ -240,7 +244,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
 
         // Sync UP
         const unsyncedDewormings = localDewormings.filter(
-          (ld) => freshGoats.some((g) => g.id === ld.goatId && g.farmerId === farmerId) &&
+          (ld) => freshGoats.some((g) => g.id === ld.goatId && inHerds(g)) &&
                   !freshDewormings.some((fd) => fd.id === ld.id)
         );
         for (const ud of unsyncedDewormings) {
@@ -260,7 +264,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
 
         // Sync UP
         const unsyncedVaccinations = localVaccinations.filter(
-          (lv) => freshGoats.some((g) => g.id === lv.goatId && g.farmerId === farmerId) &&
+          (lv) => freshGoats.some((g) => g.id === lv.goatId && inHerds(g)) &&
                   !freshVaccinations.some((fv) => fv.id === lv.id)
         );
         for (const uv of unsyncedVaccinations) {
@@ -288,13 +292,13 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
         console.error('Error syncing individual records:', subSyncErr);
       }
 
-      // Update IndexedDB with fresh data
-      const otherFarmers = localGoats.filter((g) => g.farmerId !== farmerId);
+      // Update IndexedDB with fresh data (keep other herds' cache intact)
+      const otherHerds = localGoats.filter((g) => !inHerds(g));
       await indexedDB.clearStore('goats');
-      for (const g of [...otherFarmers, ...freshGoats.filter((g) => g.farmerId === farmerId)]) {
+      for (const g of [...otherHerds, ...freshGoats.filter(inHerds)]) {
         await indexedDB.updateItem('goats', g);
       }
-      let filtered = freshGoats.filter((g) => g.farmerId === farmerId);
+      let filtered = freshGoats.filter(inHerds);
       if (status) filtered = filtered.filter((g) => g.status === status);
       return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (err) {
@@ -305,7 +309,7 @@ export async function getFarmerGoats(farmerId: string, status?: 'active' | 'sold
 
   // Fallback to IndexedDB
   const localGoats = await indexedDB.getAllItems<Goat>('goats');
-  let filtered = localGoats.filter((g) => g.farmerId === farmerId);
+  let filtered = localGoats.filter(inHerds);
   if (status) filtered = filtered.filter((g) => g.status === status);
   return filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
@@ -559,17 +563,7 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
 }
 
 // ─── Search and Filter ────────────────────────────────────────────────────────
-
-export async function searchGoats(farmerId: string, searchTerm: string): Promise<Goat[]> {
-  const allGoats = await getFarmerGoats(farmerId);
-
-  return allGoats.filter(
-    (goat) =>
-      String(goat.earTagNumber || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      String(goat.variant || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      String(goat.sellerName || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
-}
+// NOTE: list-page search filters client-side (GoatsListPage); no service helper.
 
 export async function getGoatsDueForWeight(farmerId: string): Promise<{ goat: Goat; weight: WeightRecord }[]> {
   const goats = await getFarmerGoats(farmerId, 'active');

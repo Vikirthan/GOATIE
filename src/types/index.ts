@@ -9,6 +9,16 @@ export interface User {
   updatedAt: Date;
 }
 
+export type AppRole = 'admin' | 'farmer';
+
+// Shared-herd membership: herd_id is the anchor (original owner's user id).
+// A login sees goats in every herd they own or are assigned to.
+export interface HerdMembership {
+  id: string; // herd_id (anchor user id)
+  userId: string;
+  cachedAt?: Date;
+}
+
 // Goat Types
 export interface Goat {
   id: string;

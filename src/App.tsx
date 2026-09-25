@@ -5,9 +5,11 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { Navbar } from '@/components/common/Navbar';
 import { ToastContainer } from '@/components/common/Toast';
 import { ProtectedRoute } from '@/components/common/ProtectedRoute';
+import { AdminRoute } from '@/components/common/AdminRoute';
 import { InstallPrompt } from '@/components/common/InstallPrompt';
 import { LoginPage } from '@/pages/LoginPage';
 import { RegisterPage } from '@/pages/RegisterPage';
+import { AdminPage } from '@/pages/AdminPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { GoatRegistrationPage } from '@/pages/GoatRegistrationPage';
 import { GoatsListPage } from '@/pages/GoatsListPage';
@@ -48,6 +50,7 @@ export const App: React.FC = () => {
                         <Route path="/goats" element={<GoatsListPage />} />
                         <Route path="/goats/register" element={<GoatRegistrationPage />} />
                         <Route path="/goats/:id" element={<GoatDetailPage />} />
+                        <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
                         <Route path="*" element={<NotFoundPage />} />
                       </Routes>

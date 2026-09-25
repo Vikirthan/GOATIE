@@ -17,7 +17,7 @@ import { format } from 'date-fns';
 
 export const GoatRegistrationPage: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, writableHerdIds, activeHerdId, setActiveHerdId, displayNameById } = useAuth();
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<GoatVariant[]>([]);
   const [formData, setFormData] = useState({
@@ -48,21 +48,23 @@ export const GoatRegistrationPage: React.FC = () => {
 
   useEffect(() => {
     const tag = formData.earTagNumber.trim();
-    if (!tag || !user) {
+    // Ear-tag uniqueness is per-herd (shared herds share numbering).
+    const herdId = activeHerdId ?? user?.id;
+    if (!tag || !user || !herdId) {
       setEarTagCheck('idle');
       return;
     }
     setEarTagCheck('checking');
     const timer = setTimeout(async () => {
       try {
-        const existing = await getGoatByEarTag(user.id, tag);
+        const existing = await getGoatByEarTag(herdId, tag);
         setEarTagCheck(existing ? 'duplicate' : 'available');
       } catch {
         setEarTagCheck('idle');
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [formData.earTagNumber, user]);
+  }, [formData.earTagNumber, user, activeHerdId]);
 
   // ─── Bidirectional price calculation ──────────────────────────────────────
   // Editing any one of weight / total price / price-per-kg recalculates whichever
@@ -106,8 +108,9 @@ export const GoatRegistrationPage: React.FC = () => {
     setLoading(true);
 
     try {
+      const herdId = activeHerdId ?? user.id;
       // Check if ear tag is unique among active goats (sold tags can be reused)
-      const existing = await getGoatByEarTag(user.id, formData.earTagNumber);
+      const existing = await getGoatByEarTag(herdId, formData.earTagNumber);
       if (existing) {
         showToast('error', 'This goat number is already in use by an active goat');
         setLoading(false);
@@ -117,7 +120,7 @@ export const GoatRegistrationPage: React.FC = () => {
       const qrCode = await generateQRCode(formData.earTagNumber);
       const barcode = generateBarcode(formData.earTagNumber);
 
-      await createGoat(user.id, {
+      await createGoat(herdId, {
         earTagNumber: formData.earTagNumber,
         purchaseDate: new Date(formData.purchaseDate),
         purchaseWeight: parseFloat(formData.purchaseWeight),
@@ -163,6 +166,20 @@ export const GoatRegistrationPage: React.FC = () => {
       <Card>
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-8">
+            {/* Herd selector (only for farmers who can write to multiple herds) */}
+            {user && writableHerdIds.length > 1 && (
+              <div>
+                <Label htmlFor="herd">Register into herd</Label>
+                <Select
+                  options={writableHerdIds.map((h) => ({
+                    value: h,
+                    label: h === user.id ? 'My herd' : `${displayNameById[h] || `Herd ${h.slice(0, 8)}…`}'s herd`,
+                  }))}
+                  value={activeHerdId ?? user.id}
+                  onChange={(value) => setActiveHerdId(value)}
+                />
+              </div>
+            )}
             {/* Basic Info */}
             <div className="space-y-4">
               <h2 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground pb-1 border-b border-border">Basic Information</h2>

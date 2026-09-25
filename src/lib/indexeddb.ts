@@ -1,9 +1,9 @@
 // IndexedDB utilities for offline storage
 
 const DB_NAME = 'GOATIE_DB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
-export type ObjectStore = 
+export type ObjectStore =
   | 'goats'
   | 'weights'
   | 'deworming'
@@ -13,7 +13,8 @@ export type ObjectStore =
   | 'offlineQueue'
   | 'syncHistory'
   | 'variants'
-  | 'languages';
+  | 'languages'
+  | 'memberships';
 
 let db: IDBDatabase | null = null;
 
@@ -41,6 +42,9 @@ export async function initDB(): Promise<IDBDatabase> {
         { name: 'syncHistory', keyPath: 'id' },
         { name: 'variants', keyPath: 'id' },
         { name: 'languages', keyPath: 'id' },
+        // Shared-herd membership cache: { id: herdId, userId, cachedAt }.
+        // Lets offline mode resolve "which herds am I in" without the server.
+        { name: 'memberships', keyPath: 'id' },
       ];
 
       stores.forEach((store) => {
