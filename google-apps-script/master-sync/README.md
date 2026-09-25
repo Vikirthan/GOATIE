@@ -105,9 +105,11 @@ first), then open the local URL and press Recon Now.
 | Button spins then times out | Large herd vs serverless time limits — press again; completed chunks are skipped on retry. First-ever push is the slowest; daily verifies are incremental. |
 | Sheet has ghost rows | Run Verify once (prune) — or wait for the monthly rewrite. Never paste rows by hand (no Record ID → re-added as duplicates). |
 
-## Later: closed-app cron (optional, dormant)
+## Closed-app cron (enabled)
 
 `GET /api/master-sync?run=1` with `CRON_SECRET` as bearer runs the same push —
-add a `crons` entry to `vercel.json` plus `CRON_SECRET` env when wanted. The
-`POST` trigger stays intentionally open (session auth would lock out valid
+`vercel.json` schedules it daily at 02:00 UTC, so the master sheet is verified
+even on days nobody opens the app (the monthly rewrite still happens on the
+1st). `CRON_SECRET` must be set in Vercel env or the scheduled run gets 401.
+The `POST` trigger stays intentionally open (session auth would lock out valid
 edge cases like an expired session on launch sync); the only abuse is triggering an idempotent sync of your own data.

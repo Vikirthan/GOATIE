@@ -4,5 +4,11 @@
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/master-sync?run=1",
+      "schedule": "0 2 * * *"
+    }
   ]
 }
