@@ -107,7 +107,12 @@ export const GoatsListPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('goats_searchTerm') || '');
-  const [filter, setFilter] = useState<'all' | 'active' | 'sold' | 'deceased'>(() => (sessionStorage.getItem('goats_filter') as any) || 'all');
+  const [filter, setFilter] = useState<'all' | 'active' | 'sold' | 'deceased'>(() => {
+    const stored = sessionStorage.getItem('goats_filter');
+    // Default view is Active goats. A stored 'all' can only be the previous
+    // default (not an explicit pick worth preserving), so migrate it once.
+    return stored && stored !== 'all' ? (stored as 'all' | 'active' | 'sold' | 'deceased') : 'active';
+  });
   const [variantFilter, setVariantFilter] = useState<string>(() => sessionStorage.getItem('goats_variantFilter') || 'SEMMARI');
   const [weightMin, setWeightMin] = useState(() => sessionStorage.getItem('goats_weightMin') || '');
   const [weightMax, setWeightMax] = useState(() => sessionStorage.getItem('goats_weightMax') || '');
