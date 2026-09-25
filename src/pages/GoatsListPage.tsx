@@ -107,7 +107,7 @@ export const GoatsListPage: React.FC = () => {
   const [importing, setImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('goats_searchTerm') || '');
   const [filter, setFilter] = useState<'all' | 'active' | 'sold' | 'deceased'>(() => (sessionStorage.getItem('goats_filter') as any) || 'all');
-  const [variantFilter, setVariantFilter] = useState<string>(() => sessionStorage.getItem('goats_variantFilter') || 'all');
+  const [variantFilter, setVariantFilter] = useState<string>(() => sessionStorage.getItem('goats_variantFilter') || 'SEMMARI');
   const [weightMin, setWeightMin] = useState(() => sessionStorage.getItem('goats_weightMin') || '');
   const [weightMax, setWeightMax] = useState(() => sessionStorage.getItem('goats_weightMax') || '');
   const [weightGainMin, setWeightGainMin] = useState(() => sessionStorage.getItem('goats_weightGainMin') || '');
@@ -118,7 +118,7 @@ export const GoatsListPage: React.FC = () => {
     if (location.state?.usr?.status) {
       setFilter(location.state.usr.status);
       setSearchTerm('');
-      setVariantFilter('all');
+      setVariantFilter('SEMMARI');
       setWeightMin('');
       setWeightMax('');
       setWeightGainMin('');
@@ -143,7 +143,7 @@ export const GoatsListPage: React.FC = () => {
 
   const [syncing, setSyncing] = useState(false);
   const [editingGoat, setEditingGoat] = useState<Goat | null>(null);
-  const [editForm, setEditForm] = useState({ earTagNumber: '', purchaseWeight: '', purchasePrice: '', purchaseDate: '', status: 'active' as Goat['status'], deathDate: '' });
+  const [editForm, setEditForm] = useState({ earTagNumber: '', purchaseWeight: '', purchasePrice: '', purchaseDate: '', status: 'active' as Goat['status'], deathDate: '', saleDate: '' });
 
   // Map goatId → latest recorded weight value
   const latestWeightMap = React.useMemo(() => {
@@ -187,6 +187,7 @@ export const GoatsListPage: React.FC = () => {
       purchasePrice: goat.purchasePrice.toString(),
       purchaseDate: new Date(goat.purchaseDate).toISOString().split('T')[0],
       deathDate: goat.deathDate ? new Date(goat.deathDate).toISOString().split('T')[0] : '',
+      saleDate: goat.saleInfo?.saleDate ? new Date(goat.saleInfo.saleDate).toISOString().split('T')[0] : '',
     });
   };
 
@@ -204,9 +205,15 @@ export const GoatsListPage: React.FC = () => {
         purchaseWeight: weight,
         purchasePrice: price,
         purchasePricePerKg: purchasePricePerKg,
-        purchaseDate: new Date(editForm.purchaseDate),
-        deathDate: editForm.status === 'deceased' && editForm.deathDate ? new Date(editForm.deathDate) : undefined,
       };
+
+      if (editForm.status === 'active') {
+        updates.purchaseDate = new Date(editForm.purchaseDate);
+      } else if (editForm.status === 'deceased' && editForm.deathDate) {
+        updates.deathDate = new Date(editForm.deathDate);
+      } else if (editForm.status === 'sold' && editForm.saleDate && editingGoat.saleInfo) {
+        updates.saleInfo = { ...editingGoat.saleInfo, saleDate: new Date(editForm.saleDate) };
+      }
 
       await updateGoat(editingGoat.id, updates);
       showToast('success', 'Goat updated successfully');
@@ -957,18 +964,6 @@ export const GoatsListPage: React.FC = () => {
                   <option value="deceased" className="bg-background text-foreground">Dead (Deceased)</option>
                 </select>
               </div>
-              {editForm.status === 'deceased' && (
-                <div>
-                  <Label htmlFor="editDeathDate">Death Date</Label>
-                  <Input
-                    id="editDeathDate"
-                    type="date"
-                    value={editForm.deathDate}
-                    onChange={(e) => setEditForm({ ...editForm, deathDate: e.target.value })}
-                    required
-                  />
-                </div>
-              )}
               <div>
                 <Label htmlFor="editWeight">Purchase Weight (kg)</Label>
                 <Input
@@ -991,16 +986,46 @@ export const GoatsListPage: React.FC = () => {
                   required
                 />
               </div>
-              <div>
-                <Label htmlFor="editDate">Purchase Date</Label>
-                <Input
-                  id="editDate"
-                  type="date"
-                  value={editForm.purchaseDate}
-                  onChange={(e) => setEditForm({ ...editForm, purchaseDate: e.target.value })}
-                  required
-                />
-              </div>
+              {editForm.status === 'active' && (
+                <div>
+                  <Label htmlFor="editDate">Purchase Date</Label>
+                  <Input
+                    id="editDate"
+                    type="date"
+                    value={editForm.purchaseDate}
+                    onChange={(e) => setEditForm({ ...editForm, purchaseDate: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
+              {editForm.status === 'sold' && (
+                <div>
+                  <Label htmlFor="editSaleDate">Sold Date</Label>
+                  <Input
+                    id="editSaleDate"
+                    type="date"
+                    value={editForm.saleDate}
+                    onChange={(e) => setEditForm({ ...editForm, saleDate: e.target.value })}
+                    required
+                    disabled={!editingGoat?.saleInfo}
+                  />
+                  {!editingGoat?.saleInfo && (
+                    <p className="text-xs text-muted-foreground mt-1">No sale record found for this goat yet.</p>
+                  )}
+                </div>
+              )}
+              {editForm.status === 'deceased' && (
+                <div>
+                  <Label htmlFor="editDeathDate">Death Date</Label>
+                  <Input
+                    id="editDeathDate"
+                    type="date"
+                    value={editForm.deathDate}
+                    onChange={(e) => setEditForm({ ...editForm, deathDate: e.target.value })}
+                    required
+                  />
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-2">
                 <Button type="button" variant="outline" onClick={() => setEditingGoat(null)}>
                   Cancel
