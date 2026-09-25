@@ -1,4 +1,7 @@
-# Weekly Sheets Backup — setup
+# Weekly Sheets Backup — setup (LEGACY — see ../master-sync/README.md)
+
+> Deprecated: use `../master-sync/` (daily verify + monthly rewrite + restore).
+> This folder is kept for reference during migration only.
 
 One-time setup for the backup/reconciliation Google Sheet. This is a **separate** sheet
 from any existing Google Sheets integration in the app — it doesn't touch the offline-storage
