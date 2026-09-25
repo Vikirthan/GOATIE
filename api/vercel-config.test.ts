@@ -51,4 +51,12 @@ describe('api/ bundler safety', () => {
       expect(src).not.toMatch(/from ['"]\.\.\/(\.\.\/)*src\//);
     });
   }
+
+  it('api/ pins CommonJS so functions load regardless of root type', () => {
+    // The builder compiles functions to CommonJS; with the repo root on
+    // `"type": "module"`, Node would otherwise load the emitted .js as ESM
+    // and crash at boot (FUNCTION_INVOCATION_FAILED). Do not delete this file.
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { type?: string };
+    expect(pkg.type).toBe('commonjs');
+  });
 });
