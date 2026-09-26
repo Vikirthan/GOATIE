@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, X, Moon, Sun, Settings } from 'lucide-react';
+import { Menu, X, Moon, Sun, Settings, UserRound } from 'lucide-react';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
@@ -80,6 +80,20 @@ export const Navbar: React.FC = () => {
 
             {user && (
               <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate('/dashboard')}
+                >
+                  Dashboard
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate('/analytics')}
+                >
+                  Analytics
+                </Button>
                 {isAdmin && (
                   <Button
                     variant="ghost"
@@ -139,6 +153,22 @@ export const Navbar: React.FC = () => {
             {user && (
               <>
                 <div className="px-3 py-2 text-sm">{user.displayName}</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { navigate('/dashboard'); setMenuOpen(false); }}
+                  className="justify-start"
+                >
+                  Dashboard
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { navigate('/analytics'); setMenuOpen(false); }}
+                  className="justify-start"
+                >
+                  Analytics
+                </Button>
                 {isAdmin && (
                   <Button
                     variant="outline"
@@ -149,6 +179,15 @@ export const Navbar: React.FC = () => {
                     Admin
                   </Button>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { navigate('/settings#profile'); setMenuOpen(false); }}
+                  className="justify-start gap-2"
+                >
+                  <UserRound className="h-4 w-4" />
+                  Profile
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

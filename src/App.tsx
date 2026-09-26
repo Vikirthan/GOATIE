@@ -12,6 +12,7 @@ import { RegisterPage } from '@/pages/RegisterPage';
 import { AdminPage } from '@/pages/AdminPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { DashboardPage } from '@/pages/DashboardPage';
+import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { GoatRegistrationPage } from '@/pages/GoatRegistrationPage';
 import { GoatsListPage } from '@/pages/GoatsListPage';
 import { GoatDetailPage } from '@/pages/GoatDetailPage';
@@ -48,6 +49,7 @@ export const App: React.FC = () => {
                     <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
                       <Routes>
                         <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/analytics" element={<AnalyticsPage />} />
                         <Route path="/goats" element={<GoatsListPage />} />
                         <Route path="/goats/register" element={<GoatRegistrationPage />} />
                         <Route path="/goats/:id" element={<GoatDetailPage />} />
