@@ -108,7 +108,7 @@ first), then open the local URL and press Recon Now.
 ## Closed-app cron (enabled)
 
 `GET /api/master-sync?run=1` with `CRON_SECRET` as bearer runs the same push —
-`vercel.json` schedules it daily at 02:00 UTC, so the master sheet is verified
+`vercel.json` schedules it daily at 19:30 UTC (01:00 IST), so the master sheet is verified
 even on days nobody opens the app (the monthly rewrite still happens on the
 1st). `CRON_SECRET` must be set in Vercel env or the scheduled run gets 401.
 The `POST` trigger stays intentionally open (session auth would lock out valid

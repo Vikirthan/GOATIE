@@ -8,7 +8,7 @@
   "crons": [
     {
       "path": "/api/master-sync?run=1",
-      "schedule": "0 2 * * *"
+      "schedule": "30 19 * * *"
     }
   ]
 }
