@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Label } from '@/components/ui/Label';
 import { LoadingSpinner } from '@/components/common/Loaders';
 import { showToast } from '@/components/common/Toast';
 import { useAuth } from '@/context/AuthContext';
 import * as indexedDB from '@/lib/indexeddb';
 import { OfflineAction, SyncHistoryItem } from '@/types';
 import { forceSync } from '@/services/firebaseService';
+import { updateUserDisplayName } from '@/services/authService';
 import { format } from 'date-fns';
-import { CheckCircle, Clock, Cloud, Download, RefreshCw } from 'lucide-react';
+import { CheckCircle, Clock, Cloud, Download, RefreshCw, Save, UserRound } from 'lucide-react';
 import {
   fetchMasterSyncStatus,
   resolveLastSyncAt,
@@ -32,6 +35,8 @@ export const SettingsPage: React.FC = () => {
   const [rewriteMonth, setRewriteMonth] = useState<string | null>(null);
   const [pending, setPending] = useState<OfflineAction[]>([]);
   const [history, setHistory] = useState<SyncHistoryItem[]>([]);
+  const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const loadData = async () => {
     try {
@@ -55,6 +60,15 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     void loadData();
+  }, []);
+
+  useEffect(() => {
+    setDisplayName(user?.displayName || '');
+  }, [user?.displayName]);
+
+  useEffect(() => {
+    if (window.location.hash !== '#profile') return;
+    requestAnimationFrame(() => document.getElementById('profile')?.scrollIntoView({ block: 'start' }));
   }, []);
 
   // ── Recon Now: pushes the current DB state to the ONE master spreadsheet
@@ -152,6 +166,26 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleProfileSave = async () => {
+    const trimmedName = displayName.trim();
+    if (!trimmedName) {
+      showToast('error', 'Enter a display name');
+      return;
+    }
+    if (trimmedName === user?.displayName) return;
+
+    setSavingProfile(true);
+    try {
+      const updatedUser = await updateUserDisplayName(trimmedName);
+      setDisplayName(updatedUser.displayName);
+      showToast('success', 'Profile updated');
+    } catch (err) {
+      showToast('error', 'Could not update profile', err instanceof Error ? err.message : 'Please try again');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   if (!user) return <LoadingSpinner message="Loading settings..." />;
 
   return (
@@ -160,6 +194,43 @@ export const SettingsPage: React.FC = () => {
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground mt-0.5">Sync, backups, and restore</p>
       </div>
+
+      <Card id="profile" className="scroll-mt-24">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserRound className="h-5 w-5 text-primary" />
+            Profile
+          </CardTitle>
+          <CardDescription>
+            Change the name shown in your account, herd member lists, and navigation.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex flex-col gap-3 sm:flex-row sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleProfileSave();
+            }}
+          >
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label htmlFor="profile-display-name">Display name</Label>
+              <Input
+                id="profile-display-name"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                placeholder="Enter your name"
+                autoComplete="name"
+                maxLength={80}
+              />
+            </div>
+            <Button type="submit" disabled={savingProfile} isLoading={savingProfile} className="w-full sm:w-auto">
+              {!savingProfile && <Save className="mr-2 h-4 w-4" />}
+              Save profile
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
 
       {/* Master Sheets backup */}
       <Card>

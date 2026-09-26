@@ -135,6 +135,29 @@ export async function ensureUserRole(userId: string): Promise<AppRole> {
   }
 }
 
+export async function updateUserDisplayName(displayName: string): Promise<User> {
+  const trimmedName = displayName.trim();
+  if (!trimmedName) throw new Error('Display name is required.');
+
+  const { data, error } = await supabase.auth.updateUser({
+    data: { display_name: trimmedName },
+  });
+  if (error) throw error;
+  if (!data.user) throw new Error('Unable to update the user profile.');
+
+  const user = mapSupabaseUser(data.user, trimmedName);
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .upsert(
+      { user_id: user.id, display_name: trimmedName },
+      { onConflict: 'user_id' },
+    );
+  if (profileError) throw profileError;
+
+  notifyAuthListeners(user);
+  return user;
+}
+
 // Display-name mirror for UI labels (herd names, member lists). The profiles
 // table is readable by any login, unlike auth.users. Best-effort: missing
 // table (pre-migration) or errors are silently ignored.
