@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/Input';
 import { Label } from '@/components/ui/Label';
 import { showToast } from '@/components/common/Toast';
 import { HerdSwitcher } from '@/components/common/HerdSwitcher';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   recordVaccination,
   recordDeworming,
@@ -104,11 +103,13 @@ export const DashboardPage: React.FC = () => {
   const [showDewormingModal, setShowDewormingModal] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [showWeightDueModal, setShowWeightDueModal] = useState(false);
+  const [showPendingVaccineModal, setShowPendingVaccineModal] = useState(false);
+  const [returnToPendingAfterVaccine, setReturnToPendingAfterVaccine] = useState(false);
 
   const [goatsList, setGoatsList] = useState<Goat[]>([]);
-  const [salesChartData, setSalesChartData] = useState<{ month: string; sales: number }[]>([]);
   const [weightDueGoats, setWeightDueGoats] = useState<{ goat: Goat; weight: WeightRecord }[]>([]);
   const [weightDueSearch, setWeightDueSearch] = useState('');
+  const [pendingVaccineSearch, setPendingVaccineSearch] = useState('');
 
   // Searchable goat selectors
   const vaccineRef = useRef<HTMLDivElement>(null);
@@ -194,6 +195,7 @@ export const DashboardPage: React.FC = () => {
       setWeightForm((prev) => ({ ...prev, goatId }));
       setShowWeightModal(true);
     } else if (openModal === 'vaccine') {
+      setReturnToPendingAfterVaccine(false);
       setVaccineSearch(earTag);
       setVaccineForm((prev) => ({ ...prev, goatId }));
       setShowVaccineModal(true);
@@ -218,29 +220,6 @@ export const DashboardPage: React.FC = () => {
       .filter(([v]) => !recordedMonths.includes(Number(v)));
     // If all 4 mandatory monthly weights are already recorded, the next log is an extra weight (5, 6, ...)
     return available.length > 0 ? available[0][0] : 'extra';
-  };
-
-  const getLast6Months = () => {
-    const months = [];
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const today = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      months.push({ month: monthNames[d.getMonth()], year: d.getFullYear(), monthIndex: d.getMonth(), sales: 0 });
-    }
-    return months;
-  };
-
-  const computeTrend = (goats: Goat[]) => {
-    const trend = getLast6Months();
-    goats.forEach((goat) => {
-      if (goat.status === 'sold' && goat.saleInfo) {
-        const saleDate = new Date(goat.saleInfo.saleDate);
-        const match = trend.find((m) => m.monthIndex === saleDate.getMonth() && m.year === saleDate.getFullYear());
-        if (match) match.sales += 1;
-      }
-    });
-    return trend.map((t) => ({ month: t.month, sales: t.sales }));
   };
 
   // 1. Initial Local Data Load (Offline First)
@@ -298,8 +277,7 @@ export const DashboardPage: React.FC = () => {
 
           setGoatsList(localActive);
           setAllWeights(localWeights);
-          setSalesChartData(computeTrend(farmerGoats));
-          
+
           if (localActive.length > 0) {
             setSaleForm((prev) => ({ ...prev, goatId: prev.goatId || localActive[0].id }));
           }
@@ -375,7 +353,6 @@ export const DashboardPage: React.FC = () => {
       setPendingVaccinationGoats(vacc);
       setWeightDueGoats(weightDue);
       setAllWeights(freshWeights);
-      setSalesChartData(computeTrend(allGoats));
 
     } catch (error) {
       console.error('Error processing network dashboard data:', error);
@@ -541,17 +518,21 @@ export const DashboardPage: React.FC = () => {
       return;
     }
     setSubmitting(true);
+    const completedGoatId = vaccineForm.goatId;
     try {
-      await recordVaccination(vaccineForm.goatId, {
-        goatId: vaccineForm.goatId,
+      await recordVaccination(completedGoatId, {
+        goatId: completedGoatId,
         vaccinationDate: new Date(vaccineForm.vaccinationDate),
         status: 'vaccinated',
       });
       showToast('success', 'Vaccination recorded successfully');
+      setPendingVaccinationGoats((current) => current.filter((goat) => goat.id !== completedGoatId));
       setShowVaccineModal(false);
-      setVaccineForm({ goatId: goatsList[0]?.id || '', vaccinationDate: new Date().toISOString().split('T')[0] });
-      setVaccineSearch(goatsList[0]?.earTagNumber || '');
-      loadData();
+      setVaccineForm({ goatId: '', vaccinationDate: new Date().toISOString().split('T')[0] });
+      setVaccineSearch('');
+      await loadData();
+      if (returnToPendingAfterVaccine) setShowPendingVaccineModal(true);
+      setReturnToPendingAfterVaccine(false);
     } catch (error: any) {
       showToast('error', 'Failed to record vaccination', error.message);
     } finally { setSubmitting(false); }
@@ -645,6 +626,9 @@ export const DashboardPage: React.FC = () => {
   const filteredWeightDue = weightDueGoats.filter((item) =>
     item.goat.earTagNumber.toLowerCase().includes(weightDueSearch.toLowerCase())
   );
+  const filteredPendingVaccines = pendingVaccinationGoats.filter((goat) =>
+    goat.earTagNumber.toLowerCase().includes(pendingVaccineSearch.toLowerCase())
+  );
 
   // ── Weight-Record mode helpers (mirrors the Log Deworming + toggle logic) ──
   // "Pending" = goats still missing at least one of the 4 mandatory monthly weights (1-4).
@@ -705,6 +689,7 @@ export const DashboardPage: React.FC = () => {
               setShowWeightModal(true);
             }, disabled: goatsList.length === 0 || readOnlyView },
             { label: 'Log Vaccine', icon: <Syringe className="h-5 w-5" />, color: 'bg-violet-500 hover:bg-violet-600 text-white', action: () => {
+              setReturnToPendingAfterVaccine(false);
               setVaccineSearch('');
               setVaccineForm({ goatId: '', vaccinationDate: new Date().toISOString().split('T')[0] });
               setShowVaccineModal(true);
@@ -742,7 +727,7 @@ export const DashboardPage: React.FC = () => {
           { title: 'Dead', value: stats.deadGoats, gradient: 'from-slate-500/20 via-slate-500/10 to-transparent', border: 'border-slate-500/20', text: 'text-slate-600 dark:text-slate-400', onClick: () => navigate('/goats', { state: { usr: { status: 'deceased' } } }) },
           { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
           { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
-          { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: undefined },
+          { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: () => setShowPendingVaccineModal(true) },
           { title: 'Semmari Wt (kg)', value: stats.semmariWeight, gradient: 'from-cyan-500/20 via-cyan-500/10 to-transparent', border: 'border-cyan-500/20', text: 'text-cyan-600 dark:text-cyan-400', onClick: undefined },
           { title: 'Velladu Wt (kg)', value: stats.velladuWeight, gradient: 'from-purple-500/20 via-purple-500/10 to-transparent', border: 'border-purple-500/20', text: 'text-purple-600 dark:text-purple-400', onClick: undefined },
         ].map((stat) => (
@@ -763,47 +748,79 @@ export const DashboardPage: React.FC = () => {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Monthly Sales Trend</CardTitle>
-            <CardDescription>Goat sales over the last 6 months</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={salesChartData}>
-                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                <XAxis dataKey="month" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="sales" stroke="#10b981" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <Card>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <CardTitle>Farm Analytics</CardTitle>
+            <CardDescription>Revenue, growth, health and herd — full breakdown</CardDescription>
+          </div>
+          <Button size="sm" onClick={() => navigate('/analytics')}>
+            View full analytics <ChevronRight className="h-4 w-4 ml-1" />
+          </Button>
+        </div>
+      </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Goat Distribution</CardTitle>
-            <CardDescription>Active vs Sold goats</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={[
-                { name: 'Active', value: stats.activeGoats },
-                { name: 'Sold', value: stats.soldGoats },
-              ]} barSize={48}>
-                <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="value" fill="#10b981" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      </div>
+      {showPendingVaccineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 backdrop-blur-sm sm:p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Syringe className="h-5 w-5 text-violet-500" />
+                    Pending Vaccines
+                  </CardTitle>
+                  <CardDescription>{pendingVaccinationGoats.length} goat(s) have no vaccination record</CardDescription>
+                </div>
+                <button
+                  onClick={() => setShowPendingVaccineModal(false)}
+                  className="rounded-lg p-2 hover:bg-accent transition-colors"
+                  aria-label="Close pending vaccine list"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  className="h-10 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  placeholder="Search goat by ear tag..."
+                  value={pendingVaccineSearch}
+                  onChange={(event) => setPendingVaccineSearch(event.target.value)}
+                />
+              </div>
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {filteredPendingVaccines.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    {pendingVaccinationGoats.length === 0 ? 'All active goats have a vaccination record.' : 'No matching goats'}
+                  </p>
+                ) : filteredPendingVaccines.map((goat) => (
+                  <button
+                    key={goat.id}
+                    className="group flex w-full items-center justify-between rounded-lg border border-border p-3 text-left transition-all hover:border-primary/30 hover:bg-accent"
+                    onClick={() => {
+                      setReturnToPendingAfterVaccine(true);
+                      setVaccineForm({ goatId: goat.id, vaccinationDate: new Date().toISOString().split('T')[0] });
+                      setVaccineSearch(goat.earTagNumber);
+                      setShowPendingVaccineModal(false);
+                      setShowVaccineModal(true);
+                    }}
+                  >
+                    <span>
+                      <span className="text-sm font-semibold">{goat.earTagNumber}</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{goat.variant}</span>
+                      <span className="mt-0.5 block text-xs text-yellow-600">Pending vaccination</span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-foreground" />
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {showWeightDueModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -1001,7 +1018,7 @@ export const DashboardPage: React.FC = () => {
                   <CardTitle>Log Vaccination</CardTitle>
                   <CardDescription>Record a vaccination entry for a goat</CardDescription>
                 </div>
-                <button onClick={() => setShowVaccineModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors">
+                <button onClick={() => { setShowVaccineModal(false); setReturnToPendingAfterVaccine(false); }} className="p-2 rounded-lg hover:bg-accent transition-colors">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -1034,7 +1051,7 @@ export const DashboardPage: React.FC = () => {
                   />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" type="button" onClick={() => setShowVaccineModal(false)}>Cancel</Button>
+                  <Button variant="outline" type="button" onClick={() => { setShowVaccineModal(false); setReturnToPendingAfterVaccine(false); }}>Cancel</Button>
                   <Button variant="primary" type="submit" isLoading={submitting}>Log Vaccination</Button>
                 </div>
               </form>

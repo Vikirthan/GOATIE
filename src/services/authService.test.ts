@@ -13,6 +13,7 @@ import {
   logout,
   onAuthChange,
   registerWithEmail,
+  updateUserDisplayName,
 } from '@/services/authService';
 import { getMockSupabase, resetMockSupabase } from '@/test/supabaseMock';
 
@@ -122,6 +123,39 @@ describe('onAuthChange', () => {
     fire('SIGNED_OUT', null);
     expect(seen).toEqual(['user-1', null]);
     unsub();
+  });
+});
+
+describe('updateUserDisplayName', () => {
+  it('updates auth metadata, the profile row, and auth listeners', async () => {
+    const mock = getMockSupabase();
+    mock.auth.updateUser.mockResolvedValue({
+      data: { user: { ...DB_USER, user_metadata: { display_name: 'New Name' } } },
+      error: null,
+    });
+    mock._tables.profiles = { data: null, error: null };
+    mock.auth.getSession.mockResolvedValue({ data: { session: null } });
+    const seen: string[] = [];
+    const unsub = onAuthChange((user) => {
+      if (user) seen.push(user.displayName);
+    });
+
+    const user = await updateUserDisplayName('  New Name  ');
+
+    expect(mock.auth.updateUser).toHaveBeenCalledWith({ data: { display_name: 'New Name' } });
+    expect(user.displayName).toBe('New Name');
+    expect(seen).toContain('New Name');
+    const upserts = mock._queries
+      .filter((query) => query.table === 'profiles')
+      .flatMap((query) => query.calls.filter((call) => call.method === 'upsert'));
+    expect(upserts[0]?.args[0]).toMatchObject({ user_id: 'user-1', display_name: 'New Name' });
+    unsub();
+  });
+
+  it('rejects an empty display name before writing', async () => {
+    const mock = getMockSupabase();
+    await expect(updateUserDisplayName('   ')).rejects.toThrow('Display name is required');
+    expect(mock.auth.updateUser).not.toHaveBeenCalled();
   });
 });
 

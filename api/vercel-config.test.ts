@@ -31,7 +31,7 @@ describe('vercel.json', () => {
     const cron = (vercel.crons ?? []).find((c) => c.path.startsWith('/api/master-sync'));
     expect(cron).toBeDefined();
     expect(cron?.path).toContain('run=1');
-    expect(typeof cron?.schedule).toBe('string');
+    expect(cron?.schedule).toBe('30 19 * * *');
   });
 });
 

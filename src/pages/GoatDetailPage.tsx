@@ -210,7 +210,7 @@ export const GoatDetailPage: React.FC = () => {
         />
         <InfoCard
           icon={<Tag className="h-4 w-4" />}
-          label="Purchase Price"
+          label="Total Investment"
           value={`₹${goat.purchasePrice.toLocaleString('en-IN')}`}
           accent="from-violet-500/10 to-violet-500/5"
         />
