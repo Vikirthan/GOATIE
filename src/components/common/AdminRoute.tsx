@@ -5,9 +5,11 @@ import { LoadingSpinner } from '@/components/common/Loaders';
 
 /** Route gate for /admin — waits for the role to resolve, then requires admin. */
 export const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isAdmin, loading } = useAuth();
+  const { isAuthenticated, isAdmin, role, loading } = useAuth();
 
-  if (loading) {
+  // loading=false no longer implies role has resolved (it unblocks on session
+  // alone) — wait for role so admins aren't bounced to /dashboard mid-resolve.
+  if (loading || (isAuthenticated && role === null)) {
     return <LoadingSpinner message="Checking permissions..." />;
   }
 
