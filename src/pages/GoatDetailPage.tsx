@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Tag, Calendar, Weight, Syringe, Bug, ShoppingCart, CheckCircle, XCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { ArrowLeft, Tag, Calendar, Weight, Syringe, Bug, ShoppingCart, CheckCircle, XCircle, TrendingUp, TrendingDown, Flower2 } from 'lucide-react';
 import { LoadingSpinner } from '@/components/common/Loaders';
 import { showToast } from '@/components/common/Toast';
 import {
@@ -181,12 +181,13 @@ export const GoatDetailPage: React.FC = () => {
         </div>
       )}
       {goat.status === 'active' && isWritable(goat.farmerId) && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           {[
             { label: 'Record Weight', icon: <Weight className="h-4 w-4" />, modal: 'weight' as const, color: 'bg-cyan-500 hover:bg-cyan-600' },
             { label: 'Log Vaccine', icon: <Syringe className="h-4 w-4" />, modal: 'vaccine' as const, color: 'bg-violet-500 hover:bg-violet-600' },
             { label: 'Log Deworming', icon: <Bug className="h-4 w-4" />, modal: 'deworming' as const, color: 'bg-blue-500 hover:bg-blue-600' },
             { label: 'Sell Goat', icon: <ShoppingCart className="h-4 w-4" />, modal: 'sale' as const, color: 'bg-amber-500 hover:bg-amber-600' },
+            { label: 'Mark Dead', icon: <Flower2 className="h-4 w-4" />, modal: 'death' as const, color: 'bg-slate-500 hover:bg-slate-600' },
           ].map(({ label, icon, modal, color }) => (
             <button
               key={modal}
@@ -210,7 +211,7 @@ export const GoatDetailPage: React.FC = () => {
         />
         <InfoCard
           icon={<Tag className="h-4 w-4" />}
-          label="Total Investment"
+          label="Goat Investment"
           value={`₹${goat.purchasePrice.toLocaleString('en-IN')}`}
           accent="from-violet-500/10 to-violet-500/5"
         />
@@ -257,6 +258,28 @@ export const GoatDetailPage: React.FC = () => {
       </div>
 
       {/* Current Status Info */}
+      {goat.status === 'deceased' && (
+        <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-5 space-y-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Flower2 className="h-5 w-5 text-slate-500" />
+            <h2 className="font-semibold text-slate-600 dark:text-slate-300">Death Details</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            <div>
+              <span className="text-muted-foreground block text-xs mb-0.5">Death Date</span>
+              <span className="font-semibold">{formatDate(goat.deathDate ?? goat.updatedAt)}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-xs mb-0.5">Purchase Price (Loss)</span>
+              <span className="font-semibold text-red-500">₹{goat.purchasePrice.toLocaleString('en-IN')}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground block text-xs mb-0.5">Purchase Date</span>
+              <span className="font-semibold">{formatDate(goat.purchaseDate)}</span>
+            </div>
+          </div>
+        </div>
+      )}
       {goat.status === 'sold' && goat.saleInfo && (
         <div className="rounded-xl border border-amber-200 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 p-5 space-y-3">
           <div className="flex items-center gap-2 mb-2">

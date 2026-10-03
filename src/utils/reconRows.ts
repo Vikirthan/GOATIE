@@ -1,4 +1,4 @@
-import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
+import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OtherExpense } from '@/types';
 
 // Row shapes shared between the Excel export (excelHelper.ts) and the Google
 // Sheets backup/reconciliation job (api/_lib/reconcile.ts), so both always
@@ -33,6 +33,7 @@ export function buildGoatRow(
     vaccination: vaccinated ? 'Vaccinated' : 'Unvaccinated',
     deworming: dewormed ? 'Dewormed' : 'Not done',
     status: goat.status,
+    deathDate: fmtDate(goat.deathDate),
     saleWeight: sale?.saleWeight ?? '',
     saleRatePerKg: sale?.saleRatePerKg ?? '',
     saleAmount: sale?.saleAmount ?? '',
@@ -77,5 +78,21 @@ export function buildVaccRow(v: PPRVaccinationRecord, earTagNumber: string): Rec
     administeredBy: v.administeredBy || '',
     batchNumber: v.batchNumber || '',
     remarks: v.remarks || '',
+  };
+}
+
+export function buildExpenseRow(e: OtherExpense): ReconRow {
+  return {
+    id: e.id,
+    monthKey: e.monthKey,
+    expenseDate: fmtDate(e.expenseDate),
+    ilaiSelavu: e.ilaiSelavu,
+    kuthagai: e.kuthagai,
+    medicineOthers: e.medicineOthers,
+    sambalam: e.sambalam,
+    petrol: e.petrol,
+    teaFood: e.teaFood,
+    selavu: e.selavu,
+    total: e.total,
   };
 }

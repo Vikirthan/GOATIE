@@ -16,6 +16,8 @@ import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { GoatRegistrationPage } from '@/pages/GoatRegistrationPage';
 import { GoatsListPage } from '@/pages/GoatsListPage';
 import { GoatDetailPage } from '@/pages/GoatDetailPage';
+import { DeadPage } from '@/pages/DeadPage';
+import { OtherExpensesPage } from '@/pages/OtherExpensesPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 
 export const App: React.FC = () => {
@@ -53,6 +55,8 @@ export const App: React.FC = () => {
                         <Route path="/goats" element={<GoatsListPage />} />
                         <Route path="/goats/register" element={<GoatRegistrationPage />} />
                         <Route path="/goats/:id" element={<GoatDetailPage />} />
+                        <Route path="/dead" element={<DeadPage />} />
+                        <Route path="/expenses" element={<OtherExpensesPage />} />
                         <Route path="/admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
                         <Route path="/settings" element={<SettingsPage />} />
                         <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -79,7 +83,7 @@ export const App: React.FC = () => {
                             return (
                               <div className="flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span>V.1 Goatie • Deployment: {formatted}</span>
+                                <span>V2.0 Goatie • Deployment: {formatted}</span>
                               </div>
                             );
                           } catch (e) {

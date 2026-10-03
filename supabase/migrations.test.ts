@@ -10,6 +10,8 @@ const read = (name: string) => readFileSync(join(dir, 'migrations', name), 'utf8
 const v1 = read('20260925_real_auth_rls.sql');
 const v2 = read('20260926_herds_rbac.sql');
 const v3 = read('20260926_herd_profiles.sql');
+const v4 = read('20261003_goats_death_date.sql');
+const v5 = read('20261004_other_expenses.sql');
 
 const RKT = '0c1542e6-a870-4ed9-8384-426e553da905';
 const VIKI = '53356132-4efc-4b46-85fe-6b383ac85943';
@@ -87,5 +89,25 @@ describe('v3 migration (profiles)', () => {
     expect(v3).toMatch(/for select\s+to authenticated using \(true\)/);
     const updatePolicy = v3.match(/create policy "profiles_update_self_or_admin"[\s\S]*?;/);
     expect(updatePolicy?.[0]).toContain('auth.uid() = user_id or is_admin()');
+  });
+});
+
+describe('v4 migration (goats death_date)', () => {
+  it('adds death_date idempotently', () => {
+    expect(v4).toMatch(/alter table goats add column if not exists death_date/);
+  });
+});
+
+describe('v5 migration (other_expenses)', () => {
+  it('creates the monthly expenses table with one entry per herd per month', () => {
+    expect(v5).toContain('create table if not exists other_expenses');
+    expect(v5).toMatch(/constraint other_expenses_herd_month_unique unique \(farmer_id, month_key\)/);
+  });
+
+  it('scopes expenses to herds with admin read-only', () => {
+    expect(v5).toMatch(/create policy "expenses_select_herd_or_admin"[\s\S]*?can_access_herd\(farmer_id\) or is_admin\(\)/);
+    const insertPolicy = v5.match(/create policy "expenses_insert_herd"[\s\S]*?;/);
+    expect(insertPolicy?.[0]).toContain('can_access_herd(farmer_id)');
+    expect(insertPolicy?.[0]).not.toContain('is_admin');
   });
 });

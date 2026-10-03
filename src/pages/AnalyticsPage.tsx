@@ -35,6 +35,7 @@ import {
   distinctVariants,
   filterGoats,
 } from '@/utils/analytics';
+import { sumOtherExpenses } from '@/utils/expenses';
 import { formatCurrency } from '@/utils/helpers';
 
 type Tab = 'profit' | 'growth' | 'health' | 'herd';
@@ -58,6 +59,9 @@ type GuideItem = { id: string; label: LocalizedGuideText; meaning: LocalizedGuid
 const TAB_GUIDES: Record<Tab, GuideItem[]> = {
   profit: [
     { id: 'totalInvestment', label: { en: 'Total investment', ta: 'மொத்த முதலீடு' }, meaning: { en: 'Purchase cost of every goat in the current filter, including active, sold and deceased goats.', ta: 'தற்போதைய வடிகட்டலில் உள்ள ஒவ்வொரு ஆடும் (இன்னும் உள்ளவை, விற்கப்பட்டவை, இறந்தவை உள்ளிட்ட) வாங்கிய செலவும்.' } },
+    { id: 'otherInvestments', label: { en: 'Other investments', ta: 'பிற முதலீடுகள்' }, meaning: { en: 'Sum of the 7 Other Expenses fields across every recorded month in the date filter (feed, lease, medicine, salary, petrol, tea/food, misc).', ta: 'தேதி வடிகட்டலில் உள்ள ஒவ்வொரு மாதத்தின் 7 பிற செலவுகளின் கூட்டுத்தொகை.' } },
+    { id: 'totalInvestmentAll', label: { en: 'Total Investment (all)', ta: 'மொத்த முதலீடு (அனைத்தும்)' }, meaning: { en: 'Goat purchase cost plus Other investments — the full money put into the farm.', ta: 'ஆடு வாங்கும் செலவும் பிற முதலீடுகளும் சேர்ந்து — பண்ணையில் போட்ட மொத்த பணம்.' } },
+    { id: 'trueProfit', label: { en: 'True profit (all costs)', ta: 'உண்மை லாபம் (அனைத்து செலவுகளும்)' }, meaning: { en: 'Sales revenue minus the full Total Investment (goat purchase + Other investments). The per-sale Total profit ignores monthly costs; this one includes them.', ta: 'விற்பனை வருவாயிலிருந்து மொத்த முதலீட்டை (ஆடு வாங்கும் செலவு + பிற முதலீடுகள்) கழித்தது. விற்பனை லாபம் மாதச் செலவுகளைச் சேர்க்காது; இது சேர்க்கும்.' } },
     { id: 'totalRevenue', label: { en: 'Total revenue', ta: 'மொத்த வருவாய்' }, meaning: { en: 'Money received from completed sales before commission, transport and other sale charges.', ta: 'கமிஷன், ஓச்சார், பிற விற்பனைச் செலவுகளுக்கு முன், முடிந்த விற்பனைகளிலிருந்து கிடைத்த பணம்.' } },
     { id: 'totalProfit', label: { en: 'Total profit & ROI', ta: 'மொத்த லாபம் & ROI' }, meaning: { en: 'Profit after purchase and sale costs; ROI is that profit divided by the purchase cost of sold goats.', ta: 'வாங்கும் செலவும் விற்பனைச் செலவுகளும் கழித்த பின் மிளைந்த லாபம்; ROI என்பது அந்த லாபத்தை விற்கப்பட்ட ஆடுகளின் வாங்கும் செலவால் பிரித்தது.' } },
     { id: 'averageProfit', label: { en: 'Average profit', ta: 'சராசரி லாபம்' }, meaning: { en: 'Net profit divided by the number of goats sold.', ta: 'நிகர லாபத்தை விற்கப்பட்ட ஆடுகளின் எண்ணிக்கையால் பிரித்தது.' } },
@@ -448,10 +452,20 @@ export const AnalyticsPage: React.FC = () => {
       weights: scoped.weights.filter((w) => ids.has(w.goatId)),
       dewormings: scoped.dewormings.filter((d) => ids.has(d.goatId)),
       vaccinations: scoped.vaccinations.filter((v) => ids.has(v.goatId)),
+      expenses: scoped.expenses || [],
     };
   }, [scoped, from, to, variant, gender]);
 
+  const otherTotal = useMemo(
+    () => sumOtherExpenses(filtered.expenses, from ? new Date(from) : null, to ? new Date(to) : null),
+    [filtered.expenses, from, to],
+  );
+
   const fin = useMemo(() => computeFinancials(filtered.goats, filtered.weights), [filtered]);
+  const totalInvestmentAll = useMemo(
+    () => Math.round((fin.totalInvestment + otherTotal) * 100) / 100,
+    [fin.totalInvestment, otherTotal],
+  );
   const growth = useMemo(() => computeGrowth(filtered.goats, filtered.weights), [filtered]);
   const health = useMemo(
     () => computeHealth(filtered.goats, filtered.weights, filtered.dewormings, filtered.vaccinations, growth.rows),
@@ -641,6 +655,26 @@ export const AnalyticsPage: React.FC = () => {
           language="en"
           hoverContent={<ReadyTooltip rows={ready} language="en" hasRate={fin.avgRatePerKg > 0} />}
         />
+        <Kpi
+          title={t('Total Investment', 'மொத்த முதலீடு')}
+          value={formatCurrency(totalInvestmentAll, 'INR')}
+          sub={t(`Goat purchase ${formatCurrency(fin.totalInvestment, 'INR')} + other ${formatCurrency(otherTotal, 'INR')}`, `ஆடு வாங்கியது ${formatCurrency(fin.totalInvestment, 'INR')} + பிற ${formatCurrency(otherTotal, 'INR')}`)}
+          formula={t(
+            'Total Investment = goat purchase cost (all filtered goats) + Other investments (sum of the 7 monthly expense fields in the date filter)',
+            'மொத்த முதலீடு = ஆடு வாங்கும் செலவு (வடிகட்டப்பட்ட அனைத்து ஆடுகள்) + பிற முதலீடுகள் (தேதி வடிகட்டலில் மாதாந்திர 7 செலவுகளின் கூட்டுத்தொகை)',
+          )}
+          language="en"
+        />
+        <Kpi
+          title={t('Other Investments', 'பிற முதலீடுகள்')}
+          value={formatCurrency(otherTotal, 'INR')}
+          sub={t(`${filtered.expenses.length} month(s) of Other Expenses`, `${filtered.expenses.length} மாத பிற செலவுகள்`)}
+          formula={t(
+            'Other investments = Σ month total across recorded Other Expenses months in the date filter (each month = the 7 fields added together)',
+            'பிற முதலீடுகள் = தேதி வடிகட்டலில் பதிவான பிற செலவு மாதங்களின் மாத மொத்தங்களின் கூட்டுத்தொகை (ஒவ்வொரு மாதமும் 7 புலங்களின் கூட்டுத்தொகை)',
+          )}
+          language="en"
+        />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -705,15 +739,39 @@ export const AnalyticsPage: React.FC = () => {
           <Card className="lg:col-span-2">
             <AnalysisHeader
               title="Investment and returns"
-              description="Purchase cost, recovered revenue and estimated value for the goats in this filter."
-              formula={'Total investment = Σ purchasePrice (all filtered goats)\nSales revenue = Σ saleAmount (sold goats)\nROI = total profit ÷ sold purchase cost × 100\nProjected active value = Σ(lastWeight × recent avg sale rate)'}
+              description="Purchase cost, other monthly costs, recovered revenue and estimated value for the goats in this filter."
+              formula={'Goat Investment = Σ purchasePrice (all filtered goats)\nOther investments = Σ Other Expenses month totals in the date filter\nTotal Investment (all) = goat purchase cost + Other investments\nTrue profit (all costs) = sales revenue − Total Investment (all)\nSales revenue = Σ saleAmount (sold goats)\nROI = total profit ÷ sold purchase cost × 100\nProjected active value = Σ(lastWeight × recent avg sale rate)'}
               language="en"
             />
             <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <div className="rounded-lg bg-muted/50 p-3">
-                <p className="text-xs text-muted-foreground">Total investment</p>
+                <p className="text-xs text-muted-foreground">Goat Investment</p>
                 <p className="mt-1 text-xl font-bold">{formatCurrency(fin.totalInvestment, 'INR')}</p>
-                <p className="mt-1 text-xs text-muted-foreground">Purchase cost of every goat in scope</p>
+                <p className="mt-1 text-xs text-muted-foreground">Goat purchase cost only — every goat in scope</p>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-xs text-muted-foreground">Other investments</p>
+                <p className="mt-1 text-xl font-bold">{formatCurrency(otherTotal, 'INR')}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{filtered.expenses.length} recorded month(s) · 7 expense fields each</p>
+                {filtered.expenses.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => navigate('/expenses')}
+                    className="mt-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    No months yet — add them in Other Expenses →
+                  </button>
+                )}
+              </div>
+              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3">
+                <p className="text-xs text-muted-foreground">Total Investment (all)</p>
+                <p className="mt-1 text-xl font-bold">{formatCurrency(totalInvestmentAll, 'INR')}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Goat purchase amount + Other investments</p>
+              </div>
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-xs text-muted-foreground">True profit (all costs)</p>
+                <p className="mt-1 text-xl font-bold">{formatCurrency(Math.round((fin.totalRevenue - totalInvestmentAll) * 100) / 100, 'INR')}</p>
+                <p className="mt-1 text-xs text-muted-foreground">Sales revenue minus the full Total Investment</p>
               </div>
               <div className="rounded-lg bg-muted/50 p-3">
                 <p className="text-xs text-muted-foreground">Sales revenue</p>

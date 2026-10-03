@@ -1,7 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import * as indexedDB from '@/lib/indexeddb';
-import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction, SyncHistoryItem, HerdMembership } from '@/types';
+import type { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OfflineAction, SyncHistoryItem, HerdMembership, OtherExpense, OtherExpenseFieldKey } from '@/types';
 import { generateId } from '@/utils/helpers';
+import { EXPENSE_FIELDS, duplicateMonthError, monthKeyToDate } from '@/utils/expenses';
 
 // ─── Shared herds ────────────────────────────────────────────────────────────
 // A herd is anchored by the original owner's user id (goats.farmer_id).
@@ -132,7 +133,7 @@ export function parseDates<T>(item: any, fields: string[]): T {
 // Helper: Map goat record returned from Supabase (including joined sales records)
 export function mapGoatData(item: any): Goat {
   const camelItem = snakeToCamel(item);
-  const goat = parseDates<Goat>(camelItem, ['purchaseDate', 'createdAt', 'updatedAt']);
+  const goat = parseDates<Goat>(camelItem, ['purchaseDate', 'deathDate', 'createdAt', 'updatedAt']);
 
   if (item.sales && item.sales.length > 0) {
     const sale = snakeToCamel(item.sales[0]);
@@ -469,6 +470,59 @@ export async function deleteGoat(goatId: string): Promise<void> {
   }
 }
 
+// ─── Death Services ──────────────────────────────────────────────────────────
+// Marks a goat deceased with its death date (goats.death_date, see v4
+// migration). Mirrors the recordSale pattern: Supabase first, IndexedDB
+// mirror, offline queue fallback.
+
+export async function recordDeath(goatId: string, deathDate: Date): Promise<void> {
+  const now = new Date();
+  const dbData = {
+    status: 'deceased',
+    death_date: deathDate,
+    updated_at: now,
+  };
+
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { error } = await supabase.from('goats').update(dbData).eq('id', goatId);
+    if (error) throw error;
+
+    try {
+      const existing = await indexedDB.getItem<Goat>('goats', goatId);
+      if (existing) {
+        await indexedDB.updateItem('goats', { ...existing, status: 'deceased', deathDate, updatedAt: now });
+      }
+    } catch (e) {
+      console.error('Failed to sync locally', e);
+    }
+  } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+
+    if (isNetworkError) {
+      console.log('Offline: queuing death record locally');
+
+      const existing = await indexedDB.getItem<Goat>('goats', goatId);
+      if (existing) {
+        await indexedDB.updateItem('goats', { ...existing, status: 'deceased', deathDate, updatedAt: now });
+      }
+
+      const offlineAction: OfflineAction = {
+        id: generateId(),
+        type: 'update',
+        collection: 'goats',
+        data: { id: goatId, updates: { status: 'deceased', deathDate, updatedAt: now } },
+        timestamp: new Date(),
+        synced: false,
+      };
+      await indexedDB.addItem('offlineQueue', offlineAction as any);
+    } else {
+      throw err;
+    }
+  }
+}
+
 // ─── Weight Services ─────────────────────────────────────────────────────────
 
 export async function recordWeight(
@@ -701,6 +755,195 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   return parseDates<SaleInfo>(snakeToCamel(data), ['saleDate', 'createdAt', 'updatedAt']);
 }
 
+// ─── Other Expenses Services ─────────────────────────────────────────────────
+// One row per herd per calendar month (unique farmer_id + month_key).
+// A second save for the same month throws loudly — callers surface it via toast.
+
+const EXPENSE_NUM_FIELDS: OtherExpenseFieldKey[] = EXPENSE_FIELDS.map((f) => f.key);
+
+function toExpenseNumber(v: unknown): number {
+  const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
+  return isNaN(n) || n < 0 ? 0 : Math.round(n * 100) / 100;
+}
+
+export function mapExpenseData(item: any): OtherExpense {
+  const camel = snakeToCamel(item);
+  const parsed = parseDates<OtherExpense>(camel, ['expenseDate', 'createdAt', 'updatedAt']);
+  for (const k of [...EXPENSE_NUM_FIELDS, 'total' as const]) {
+    (parsed as any)[k] = toExpenseNumber((parsed as any)[k]);
+  }
+  return parsed;
+}
+
+function expenseTotalOf(values: Record<OtherExpenseFieldKey, number | string>): number {
+  let total = 0;
+  for (const k of EXPENSE_NUM_FIELDS) {
+    total += toExpenseNumber(values[k]);
+  }
+  return Math.round(total * 100) / 100;
+}
+
+export async function getOtherExpenses(farmerId: string): Promise<OtherExpense[]> {
+  const herdIds = await getMyHerdIds(farmerId);
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { data, error } = await supabase
+      .from('other_expenses')
+      .select('*')
+      .in('farmer_id', herdIds)
+      .order('expense_date', { ascending: false });
+    if (error) throw error;
+
+    const expenses = (data || []).map(mapExpenseData);
+
+    if (navigator.onLine) {
+      Promise.all(expenses.map((e) => indexedDB.updateItem('expenses', e))).catch((e) =>
+        console.error('Failed to sync expenses to local DB:', e),
+      );
+    }
+
+    return expenses;
+  } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError =
+      !navigator.onLine ||
+      errMsg === 'Offline' ||
+      errMsg.toLowerCase().includes('fetch') ||
+      errMsg.toLowerCase().includes('network');
+    if (!isNetworkError) throw err;
+
+    const allowed = new Set(herdIds);
+    const local = await indexedDB.getAllItems<OtherExpense>('expenses').catch(() => [] as OtherExpense[]);
+    return local
+      .filter((e) => allowed.has(e.farmerId))
+      .sort((a, b) => new Date(b.expenseDate).getTime() - new Date(a.expenseDate).getTime());
+  }
+}
+
+export async function saveOtherExpense(
+  herdId: string,
+  monthKey: string,
+  values: Record<OtherExpenseFieldKey, number | string>,
+): Promise<OtherExpense> {
+  const clean: Record<OtherExpenseFieldKey, number> = {} as Record<OtherExpenseFieldKey, number>;
+  for (const k of EXPENSE_NUM_FIELDS) clean[k] = toExpenseNumber(values[k]);
+  const total = expenseTotalOf(clean);
+  const now = new Date();
+
+  // Loud duplicate guard (per herd per month) before touching the network —
+  // the DB unique constraint is the backstop, this is the user-facing error.
+  const existingLocal = await indexedDB.getAllItems<OtherExpense>('expenses').catch(() => [] as OtherExpense[]);
+  if (existingLocal.some((e) => e.farmerId === herdId && e.monthKey === monthKey)) {
+    throw duplicateMonthError(monthKey);
+  }
+
+  const expense: OtherExpense = {
+    id: generateId(),
+    farmerId: herdId,
+    monthKey,
+    expenseDate: monthKeyToDate(monthKey),
+    ...clean,
+    total,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { error } = await supabase.from('other_expenses').insert(camelToSnake(expense));
+    if (error) {
+      if (String((error as any)?.code) === '23505' || String((error as any)?.message || '').toLowerCase().includes('duplicate')) {
+        throw duplicateMonthError(monthKey);
+      }
+      throw error;
+    }
+
+    try {
+      await indexedDB.addItem('expenses', expense);
+    } catch (e) {
+      console.error('Failed to sync locally', e);
+    }
+  } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isDuplicate =
+      errMsg.includes('already exists!') ||
+      errMsg.toLowerCase().includes('duplicate') ||
+      String((err as any)?.code) === '23505';
+    if (isDuplicate) throw err instanceof Error && errMsg.includes('already exists!') ? err : duplicateMonthError(monthKey);
+
+    const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+    if (isNetworkError) {
+      console.log('Offline: queuing expense creation locally');
+      await indexedDB.addItem('expenses', expense).catch(() => indexedDB.updateItem('expenses', expense));
+      const offlineAction: OfflineAction = {
+        id: generateId(),
+        type: 'create',
+        collection: 'expenses',
+        data: { expense },
+        timestamp: new Date(),
+        synced: false,
+      };
+      await indexedDB.addItem('offlineQueue', offlineAction as any);
+    } else {
+      throw err;
+    }
+  }
+
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
+  return expense;
+}
+
+export async function updateOtherExpense(
+  expenseId: string,
+  values: Record<OtherExpenseFieldKey, number | string>,
+): Promise<void> {
+  const clean: Record<OtherExpenseFieldKey, number> = {} as Record<OtherExpenseFieldKey, number>;
+  for (const k of EXPENSE_NUM_FIELDS) clean[k] = toExpenseNumber(values[k]);
+  const total = expenseTotalOf(clean);
+  const updatedAt = new Date();
+
+  const existing = await indexedDB.getItem<OtherExpense>('expenses', expenseId).catch(() => undefined);
+  const dbData = { ...clean, total, updated_at: updatedAt };
+
+  try {
+    if (!navigator.onLine) throw new Error('Offline');
+    const { error } = await supabase.from('other_expenses').update(camelToSnake(dbData)).eq('id', expenseId);
+    if (error) throw error;
+
+    if (existing) {
+      await indexedDB.updateItem('expenses', { ...existing, ...clean, total, updatedAt }).catch(() => {});
+    }
+  } catch (err: any) {
+    const errMsg = err?.message || err?.error || err?.toString() || '';
+    const isNetworkError = !navigator.onLine || errMsg === 'Offline' || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network');
+    if (isNetworkError) {
+      if (existing) {
+        await indexedDB.updateItem('expenses', { ...existing, ...clean, total, updatedAt }).catch(() => {});
+      }
+      const offlineAction: OfflineAction = {
+        id: generateId(),
+        type: 'update',
+        collection: 'expenses',
+        data: { id: expenseId, updates: dbData },
+        timestamp: new Date(),
+        synced: false,
+      };
+      await indexedDB.addItem('offlineQueue', offlineAction as any);
+    } else {
+      throw err;
+    }
+  }
+
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
+}
+
+export async function deleteOtherExpense(expenseId: string): Promise<void> {
+  const { error } = await supabase.from('other_expenses').delete().eq('id', expenseId);
+  if (error) throw error;
+  await indexedDB.deleteItem('expenses', expenseId).catch(() => {});
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
+}
+
 // ─── Reports and Notifications ───────────────────────────────────────────────
 // NOTE: no explicit farmer_id filter here — RLS scopes these to the caller's
 // own goats (child tables check goats.farmer_id = auth.uid() via goat_id).
@@ -848,6 +1091,40 @@ export async function syncOfflineActions() {
           console.log(`Successfully synced updated goat ${id}`);
         } catch (err) {
           console.error(`Failed to sync offline update action ${action.id}:`, err);
+          if (isPermissionError(err)) await dropFailedAction(action, String((err as any)?.message || err));
+        }
+      } else if (action.type === 'create' && action.collection === 'expenses') {
+        const { expense } = action.data;
+        try {
+          const { error } = await supabase.from('other_expenses').insert(camelToSnake(expense));
+          if (error) throw error;
+          await indexedDB.deleteItem('offlineQueue', action.id);
+          const historyItem: SyncHistoryItem = {
+            id: generateId(),
+            actionId: action.id,
+            description: `Other expenses ${(expense as OtherExpense).monthKey} - creation synced`,
+            syncedAt: new Date(),
+          };
+          await indexedDB.addItem('syncHistory', historyItem as any);
+        } catch (err) {
+          console.error(`Failed to sync offline expense create ${action.id}:`, err);
+          if (isPermissionError(err)) await dropFailedAction(action, String((err as any)?.message || err));
+        }
+      } else if (action.type === 'update' && action.collection === 'expenses') {
+        const { id, updates } = action.data;
+        try {
+          const { error } = await supabase.from('other_expenses').update(camelToSnake(updates)).eq('id', id);
+          if (error) throw error;
+          await indexedDB.deleteItem('offlineQueue', action.id);
+          const historyItem: SyncHistoryItem = {
+            id: generateId(),
+            actionId: action.id,
+            description: `Other expenses - edits synced`,
+            syncedAt: new Date(),
+          };
+          await indexedDB.addItem('syncHistory', historyItem as any);
+        } catch (err) {
+          console.error(`Failed to sync offline expense update ${action.id}:`, err);
           if (isPermissionError(err)) await dropFailedAction(action, String((err as any)?.message || err));
         }
       }

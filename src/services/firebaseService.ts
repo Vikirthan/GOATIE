@@ -1,4 +1,4 @@
-import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
+import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OtherExpense, OtherExpenseFieldKey } from '@/types';
 import { generateId } from '@/utils/helpers';
 import * as indexedDB from '@/lib/indexeddb';
 import * as sheetsService from './sheetsStorageService';
@@ -560,6 +560,114 @@ export async function getSaleInfo(goatId: string): Promise<SaleInfo | null> {
   }
   const localSales = await indexedDB.getAllItems<SaleInfo>('sales');
   return localSales.find((s) => s.goatId === goatId) || null;
+}
+
+// ─── Death Services ─────────────────────────────────────────────────────────
+
+export async function recordDeath(goatId: string, deathDate: Date): Promise<void> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.recordDeath(goatId, deathDate);
+  }
+  const existing = await indexedDB.getItem<Goat>('goats', goatId);
+  if (existing) {
+    await indexedDB.updateItem('goats', {
+      ...existing,
+      status: 'deceased',
+      deathDate,
+      updatedAt: new Date(),
+    });
+  }
+}
+
+// ─── Other Expenses Services ────────────────────────────────────────────────
+// Delegates to Supabase when enabled (herd-scoped + RLS); otherwise the
+// device-local IndexedDB mirror acts as the store.
+
+export async function getOtherExpenses(farmerId: string): Promise<OtherExpense[]> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.getOtherExpenses(farmerId);
+  }
+  const herdIds = new Set(await supabaseService.getMyHerdIds(farmerId));
+  const local = await indexedDB.getAllItems<OtherExpense>('expenses');
+  return local
+    .filter((e) => herdIds.has(e.farmerId))
+    .sort((a, b) => new Date(b.expenseDate).getTime() - new Date(a.expenseDate).getTime());
+}
+
+export async function saveOtherExpense(
+  herdId: string,
+  monthKey: string,
+  values: Record<OtherExpenseFieldKey, number | string>,
+): Promise<OtherExpense> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.saveOtherExpense(herdId, monthKey, values);
+  }
+  const { duplicateMonthError, monthKeyToDate } = await import('@/utils/expenses');
+  const local = await indexedDB.getAllItems<OtherExpense>('expenses');
+  if (local.some((e) => e.farmerId === herdId && e.monthKey === monthKey)) {
+    throw duplicateMonthError(monthKey);
+  }
+  const num = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
+    return isNaN(n) || n < 0 ? 0 : Math.round(n * 100) / 100;
+  };
+  const now = new Date();
+  const expense: OtherExpense = {
+    id: generateId(),
+    farmerId: herdId,
+    monthKey,
+    expenseDate: monthKeyToDate(monthKey),
+    ilaiSelavu: num(values.ilaiSelavu),
+    kuthagai: num(values.kuthagai),
+    medicineOthers: num(values.medicineOthers),
+    sambalam: num(values.sambalam),
+    petrol: num(values.petrol),
+    teaFood: num(values.teaFood),
+    selavu: num(values.selavu),
+    total: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  expense.total = num(expense.ilaiSelavu) + num(expense.kuthagai) + num(expense.medicineOthers) + num(expense.sambalam) + num(expense.petrol) + num(expense.teaFood) + num(expense.selavu);
+  expense.total = Math.round(expense.total * 100) / 100;
+  await indexedDB.addItem('expenses', expense);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
+  return expense;
+}
+
+export async function updateOtherExpense(
+  expenseId: string,
+  values: Record<OtherExpenseFieldKey, number | string>,
+): Promise<void> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.updateOtherExpense(expenseId, values);
+  }
+  const num = (v: unknown): number => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v ?? ''));
+    return isNaN(n) || n < 0 ? 0 : Math.round(n * 100) / 100;
+  };
+  const existing = await indexedDB.getItem<OtherExpense>('expenses', expenseId);
+  if (!existing) return;
+  const clean = {
+    ilaiSelavu: num(values.ilaiSelavu),
+    kuthagai: num(values.kuthagai),
+    medicineOthers: num(values.medicineOthers),
+    sambalam: num(values.sambalam),
+    petrol: num(values.petrol),
+    teaFood: num(values.teaFood),
+    selavu: num(values.selavu),
+  };
+  const total = Math.round((clean.ilaiSelavu + clean.kuthagai + clean.medicineOthers + clean.sambalam + clean.petrol + clean.teaFood + clean.selavu) * 100) / 100;
+  await indexedDB.updateItem('expenses', { ...existing, ...clean, total, updatedAt: new Date() });
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
+}
+
+export async function deleteOtherExpense(expenseId: string): Promise<void> {
+  if (isSupabaseEnabled()) {
+    return supabaseService.deleteOtherExpense(expenseId);
+  }
+  await indexedDB.deleteItem('expenses', expenseId);
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('data-synced'));
 }
 
 // ─── Search and Filter ────────────────────────────────────────────────────────

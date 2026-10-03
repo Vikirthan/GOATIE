@@ -202,3 +202,35 @@ export interface SyncHistoryItem {
   description: string; // e.g. "Goat 88 - created", "Goat 88 - edited"
   syncedAt: Date;
 }
+
+// Other Monthly Expenses (one entry per herd per calendar month).
+// The 7 Tamil-labelled fields are stored as fixed numeric columns so the
+// monthly total is always the exact sum of its parts.
+export type OtherExpenseFieldKey =
+  | 'ilaiSelavu'
+  | 'kuthagai'
+  | 'medicineOthers'
+  | 'sambalam'
+  | 'petrol'
+  | 'teaFood'
+  | 'selavu';
+
+export interface OtherExpense {
+  id: string;
+  /** Herd anchor (owner UUID) this month's expenses belong to. */
+  farmerId: string;
+  /** Calendar month key: 'YYYY-MM'. Unique per herd. */
+  monthKey: string;
+  /** First day of the month (for sorting / range filters). */
+  expenseDate: Date;
+  ilaiSelavu: number;
+  kuthagai: number;
+  medicineOthers: number;
+  sambalam: number;
+  petrol: number;
+  teaFood: number;
+  selavu: number;
+  total: number;
+  createdAt: Date;
+  updatedAt: Date;
+}

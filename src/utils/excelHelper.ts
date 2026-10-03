@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
-import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo } from '@/types';
-import { buildGoatRow, buildWeightRow, buildDewormRow, buildVaccRow } from '@/utils/reconRows';
+import { Goat, WeightRecord, DewormingRecord, PPRVaccinationRecord, SaleInfo, OtherExpense } from '@/types';
+import { buildGoatRow, buildWeightRow, buildDewormRow, buildVaccRow, buildExpenseRow } from '@/utils/reconRows';
 
 // ─── Shared Helpers ───────────────────────────────────────────────────────────
 
@@ -67,6 +67,7 @@ export interface ExportDataBundle {
   dewormings: DewormingRecord[];
   vaccinations: PPRVaccinationRecord[];
   sales: SaleInfo[];
+  expenses?: OtherExpense[];
 }
 
 // ─── Import Interfaces ────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ const GOAT_COLS = {
   vaccination:   'Vaccination Status',
   deworming:     'Deworming Status',
   status:        'Status',
+  deathDate:     'Death Date',
   saleWeight:    'Sale Weight (kg)',
   saleRatePerKg: 'Sale Rate (₹/kg)',
   saleAmount:    'Sale Amount (₹)',
@@ -166,10 +168,23 @@ const VACC_COLS = {
   remarks:       'Remarks',
 };
 
+const EXPENSE_COLS = {
+  month:          'Month (YYYY-MM)',
+  expenseDate:    'Expense Date',
+  ilaiSelavu:     'இவை செலவு (₹)',
+  kuthagai:       'குத்தகை (₹)',
+  medicineOthers: 'Medicine & Others (₹)',
+  sambalam:       'சம்பளம் (₹)',
+  petrol:         'பெட்ரோல் (₹)',
+  teaFood:        'டி & சாப்பாடு (₹)',
+  selavu:         'செலவு (₹)',
+  total:          'Month Total (₹)',
+};
+
 // ─── EXPORT ───────────────────────────────────────────────────────────────────
 
 export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void> {
-  const { goats, weights, dewormings, vaccinations, sales } = bundle;
+  const { goats, weights, dewormings, vaccinations, sales, expenses = [] } = bundle;
 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'GOATIE';
@@ -191,6 +206,7 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
     { header: GOAT_COLS.vaccination,    key: 'vaccination',    width: 20 },
     { header: GOAT_COLS.deworming,      key: 'deworming',      width: 20 },
     { header: GOAT_COLS.status,         key: 'status',         width: 15 },
+    { header: GOAT_COLS.deathDate,      key: 'deathDate',      width: 15 },
     { header: GOAT_COLS.saleWeight,     key: 'saleWeight',     width: 15 },
     { header: GOAT_COLS.saleRatePerKg,  key: 'saleRatePerKg',  width: 18 },
     { header: GOAT_COLS.saleAmount,     key: 'saleAmount',     width: 18 },
@@ -275,6 +291,28 @@ export async function exportGoatsToExcel(bundle: ExportDataBundle): Promise<void
     })
     .forEach((v) => {
       vSheet.addRow(buildVaccRow(v, goatById.get(v.goatId)?.earTagNumber ?? v.goatId));
+    });
+
+  // ── Sheet 5: Other Expenses ──────────────────────────────────────────────
+  const eSheet = workbook.addWorksheet('Other Expenses');
+  eSheet.columns = [
+    { header: EXPENSE_COLS.month,          key: 'monthKey',       width: 18 },
+    { header: EXPENSE_COLS.expenseDate,    key: 'expenseDate',    width: 15 },
+    { header: EXPENSE_COLS.ilaiSelavu,     key: 'ilaiSelavu',     width: 18 },
+    { header: EXPENSE_COLS.kuthagai,       key: 'kuthagai',       width: 15 },
+    { header: EXPENSE_COLS.medicineOthers, key: 'medicineOthers', width: 24 },
+    { header: EXPENSE_COLS.sambalam,       key: 'sambalam',       width: 15 },
+    { header: EXPENSE_COLS.petrol,         key: 'petrol',         width: 15 },
+    { header: EXPENSE_COLS.teaFood,        key: 'teaFood',        width: 20 },
+    { header: EXPENSE_COLS.selavu,         key: 'selavu',         width: 15 },
+    { header: EXPENSE_COLS.total,          key: 'total',          width: 18 },
+  ];
+  styleHeader(eSheet.getRow(1), 'FF14B8A6');
+
+  [...expenses]
+    .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
+    .forEach((e) => {
+      eSheet.addRow(buildExpenseRow(e));
     });
 
   // ── Download ───────────────────────────────────────────────────────────────

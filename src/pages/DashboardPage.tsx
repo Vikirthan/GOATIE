@@ -14,6 +14,7 @@ import {
   recordDeworming,
   recordWeight,
   recordSale,
+  recordDeath,
   getGoatWeights,
 } from '@/services/firebaseService';
 import * as indexedDB from '@/lib/indexeddb';
@@ -21,7 +22,7 @@ import { Goat, WeightRecord } from '@/types';
 import { formatDate } from '@/utils/helpers';
 import {
   Plus, Scale, Syringe, Bug, ShoppingCart, List,
-  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag, RefreshCw
+  ChevronRight, TrendingUp, TrendingDown, X, Search, AlertCircle, Tag, RefreshCw, Flower2, Wallet
 } from 'lucide-react';
 
 const GoatSearchDropdown = ({
@@ -102,6 +103,7 @@ export const DashboardPage: React.FC = () => {
   const [showVaccineModal, setShowVaccineModal] = useState(false);
   const [showDewormingModal, setShowDewormingModal] = useState(false);
   const [showSaleModal, setShowSaleModal] = useState(false);
+  const [showDeathModal, setShowDeathModal] = useState(false);
   const [showWeightDueModal, setShowWeightDueModal] = useState(false);
   const [showPendingVaccineModal, setShowPendingVaccineModal] = useState(false);
   const [returnToPendingAfterVaccine, setReturnToPendingAfterVaccine] = useState(false);
@@ -116,6 +118,7 @@ export const DashboardPage: React.FC = () => {
   const dewormingRef = useRef<HTMLDivElement>(null);
   const weightRef = useRef<HTMLDivElement>(null);
   const saleRef = useRef<HTMLDivElement>(null);
+  const deathRef = useRef<HTMLDivElement>(null);
 
   // Local IndexedDB snapshot is only an instant first paint — once network
   // data has been applied it must never overwrite it (herdIds resolving late
@@ -130,6 +133,8 @@ export const DashboardPage: React.FC = () => {
   const [showWeightGoatDropdown, setShowWeightGoatDropdown] = useState(false);
   const [saleGoatSearch, setSaleGoatSearch] = useState('');
   const [showSaleGoatDropdown, setShowSaleGoatDropdown] = useState(false);
+  const [deathGoatSearch, setDeathGoatSearch] = useState('');
+  const [showDeathGoatDropdown, setShowDeathGoatDropdown] = useState(false);
 
   // Filtered dropdown states
   const [pendingDewormingGoats, setPendingDewormingGoats] = useState<Goat[]>([]);
@@ -180,12 +185,17 @@ export const DashboardPage: React.FC = () => {
     remarks: '',
   });
 
+  const [deathForm, setDeathForm] = useState({
+    goatId: '',
+    deathDate: new Date().toISOString().split('T')[0],
+  });
+
   // Opened via a "Record Weight for this goat" style deep link (e.g. from the Goat
   // Detail page) instead of the generic Quick Actions row — pre-fills the search
   // and opens the right modal directly instead of making the user re-search by ear tag.
   useEffect(() => {
     const deepLink = location.state?.usr as
-      | { openModal: 'weight' | 'vaccine' | 'deworming' | 'sale'; goatId: string; earTag: string }
+      | { openModal: 'weight' | 'vaccine' | 'deworming' | 'sale' | 'death'; goatId: string; earTag: string }
       | undefined;
     if (!deepLink) return;
 
@@ -207,6 +217,10 @@ export const DashboardPage: React.FC = () => {
       setSaleGoatSearch(earTag);
       setSaleForm((prev) => ({ ...prev, goatId }));
       setShowSaleModal(true);
+    } else if (openModal === 'death') {
+      setDeathGoatSearch(earTag);
+      setDeathForm((prev) => ({ ...prev, goatId }));
+      setShowDeathModal(true);
     }
 
     // Clear location state so refreshing/navigating back doesn't reopen the modal.
@@ -401,6 +415,7 @@ export const DashboardPage: React.FC = () => {
       if (dewormingRef.current && !dewormingRef.current.contains(event.target as Node)) setShowDewormingDropdown(false);
       if (weightRef.current && !weightRef.current.contains(event.target as Node)) setShowWeightGoatDropdown(false);
       if (saleRef.current && !saleRef.current.contains(event.target as Node)) setShowSaleGoatDropdown(false);
+      if (deathRef.current && !deathRef.current.contains(event.target as Node)) setShowDeathGoatDropdown(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -611,6 +626,27 @@ export const DashboardPage: React.FC = () => {
     } finally { setSubmitting(false); }
   };
 
+  const handleDeathSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deathForm.goatId) { showToast('error', 'Please search and select a valid goat'); return; }
+    if (!isWritable(goatsList.find((g) => g.id === deathForm.goatId)?.farmerId)) {
+      showToast('error', 'View-only herd', 'You can look at this herd but cannot record into it.');
+      return;
+    }
+    if (!deathForm.deathDate) { showToast('error', 'Please pick the death date'); return; }
+    setSubmitting(true);
+    try {
+      await recordDeath(deathForm.goatId, new Date(deathForm.deathDate));
+      showToast('success', 'Death recorded successfully');
+      setShowDeathModal(false);
+      setDeathForm({ goatId: '', deathDate: new Date().toISOString().split('T')[0] });
+      setDeathGoatSearch('');
+      loadData();
+    } catch (error: any) {
+      showToast('error', 'Failed to record death', error.message);
+    } finally { setSubmitting(false); }
+  };
+
   // No loading check to prevent full page spinner
 
   const selectedGoatForSale = goatsList.find((g) => g.id === saleForm.goatId);
@@ -680,7 +716,7 @@ export const DashboardPage: React.FC = () => {
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {[
             { label: 'Register Goat', icon: <Plus className="h-5 w-5" />, color: 'bg-emerald-500 hover:bg-emerald-600 text-white', action: () => navigate('/goats/register') },
             { label: 'Record Weight', icon: <Scale className="h-5 w-5" />, color: 'bg-cyan-500 hover:bg-cyan-600 text-white', action: () => {
@@ -704,6 +740,12 @@ export const DashboardPage: React.FC = () => {
               setSaleForm({ goatId: '', saleDate: new Date().toISOString().split('T')[0], saleWeight: '', saleRatePerKg: '', saleTotalPrice: '', remarks: '' });
               setShowSaleModal(true);
             }, disabled: goatsList.length === 0 || readOnlyView },
+            { label: 'Log Death', icon: <Flower2 className="h-5 w-5" />, color: 'bg-slate-500 hover:bg-slate-600 text-white', action: () => {
+              setDeathGoatSearch('');
+              setDeathForm({ goatId: '', deathDate: new Date().toISOString().split('T')[0] });
+              setShowDeathModal(true);
+            }, disabled: goatsList.length === 0 || readOnlyView },
+            { label: 'Other Expenses', icon: <Wallet className="h-5 w-5" />, color: 'bg-teal-500 hover:bg-teal-600 text-white', action: () => navigate('/expenses'), disabled: readOnlyView },
             { label: 'View All Goats', icon: <List className="h-5 w-5" />, color: 'bg-slate-600 hover:bg-slate-700 text-white', action: () => navigate('/goats') },
           ].map(({ label, icon, color, action, disabled }) => (
             <button
@@ -724,7 +766,7 @@ export const DashboardPage: React.FC = () => {
           { title: 'Total Goats', value: stats.totalGoats, gradient: 'from-blue-500/20 via-blue-500/10 to-transparent', border: 'border-blue-500/20', text: 'text-blue-600 dark:text-blue-400', onClick: () => navigate('/goats', { state: { usr: { status: 'all' } } }) },
           { title: 'Active', value: stats.activeGoats, gradient: 'from-emerald-500/20 via-emerald-500/10 to-transparent', border: 'border-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', onClick: () => navigate('/goats', { state: { usr: { status: 'active' } } }) },
           { title: 'Sold', value: stats.soldGoats, gradient: 'from-amber-500/20 via-amber-500/10 to-transparent', border: 'border-amber-500/20', text: 'text-amber-600 dark:text-amber-400', onClick: () => navigate('/goats', { state: { usr: { status: 'sold' } } }) },
-          { title: 'Dead', value: stats.deadGoats, gradient: 'from-slate-500/20 via-slate-500/10 to-transparent', border: 'border-slate-500/20', text: 'text-slate-600 dark:text-slate-400', onClick: () => navigate('/goats', { state: { usr: { status: 'deceased' } } }) },
+          { title: 'Dead', value: stats.deadGoats, gradient: 'from-slate-500/20 via-slate-500/10 to-transparent', border: 'border-slate-500/20', text: 'text-slate-600 dark:text-slate-400', onClick: () => navigate('/dead') },
           { title: 'Weight Due', value: stats.weightDue, gradient: 'from-orange-500/20 via-orange-500/10 to-transparent', border: 'border-orange-500/20', text: 'text-orange-600 dark:text-orange-400', onClick: () => setShowWeightDueModal(true) },
           { title: 'Pending Deworm', value: stats.pendingDeworming, gradient: 'from-red-500/20 via-red-500/10 to-transparent', border: 'border-red-500/20', text: 'text-red-600 dark:text-red-400', onClick: undefined },
           { title: 'Pending Vaccine', value: stats.pendingVaccination, gradient: 'from-yellow-500/20 via-yellow-500/10 to-transparent', border: 'border-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', onClick: () => setShowPendingVaccineModal(true) },
@@ -1233,6 +1275,60 @@ export const DashboardPage: React.FC = () => {
                 <div className="flex justify-end gap-2 pt-2">
                   <Button variant="outline" type="button" onClick={() => setShowSaleModal(false)}>Cancel</Button>
                   <Button variant="primary" type="submit" isLoading={submitting}>Record Sale</Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {showDeathModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-md bg-card shadow-2xl">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Flower2 className="h-5 w-5 text-slate-500" />
+                    Log Death
+                  </CardTitle>
+                  <CardDescription>Mark an active goat as deceased with its death date</CardDescription>
+                </div>
+                <button onClick={() => setShowDeathModal(false)} className="p-2 rounded-lg hover:bg-accent transition-colors" aria-label="Close log death">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleDeathSubmit} className="space-y-4">
+                <div>
+                  <Label htmlFor="deathGoatSearch">Search Goat (Ear Tag)</Label>
+                  <GoatSearchDropdown
+                    refEl={deathRef}
+                    searchVal={deathGoatSearch}
+                    setSearch={setDeathGoatSearch}
+                    showDropdown={showDeathGoatDropdown}
+                    setShowDropdown={setShowDeathGoatDropdown}
+                    formGoatId={deathForm.goatId}
+                    setFormGoatId={(id, tag) => { setDeathForm({ ...deathForm, goatId: id }); setDeathGoatSearch(tag); }}
+                    placeholder="Type ear tag number..."
+                    id="deathGoatSearch"
+                    goatsList={goatsList}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="deathDate">Death Date</Label>
+                  <Input
+                    id="deathDate"
+                    type="date"
+                    value={deathForm.deathDate}
+                    onChange={(e) => setDeathForm({ ...deathForm, deathDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setShowDeathModal(false)}>Cancel</Button>
+                  <Button variant="primary" type="submit" isLoading={submitting}>Mark Deceased</Button>
                 </div>
               </form>
             </CardContent>

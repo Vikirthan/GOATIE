@@ -9,6 +9,7 @@ vi.mock('@/lib/supabase', async () => {
 
 import {
   camelToSnake,
+  mapExpenseData,
   mapGoatData,
   parseDates,
   snakeToCamel,
@@ -97,5 +98,42 @@ describe('mapGoatData', () => {
     });
     expect(goat.saleInfo?.id).toBe('s1');
     expect(goat.saleInfo?.saleDate).toBeInstanceOf(Date);
+  });
+
+  it('parses death_date back into a Date', () => {
+    const goat = mapGoatData({
+      ...snakeGoat,
+      death_date: '2026-07-01T00:00:00.000Z',
+      status: 'deceased',
+      sales: [],
+    });
+    expect(goat.deathDate).toBeInstanceOf(Date);
+  });
+});
+
+describe('mapExpenseData', () => {
+  it('maps snake_case months and coerces the 7 fields to numbers', () => {
+    const expense = mapExpenseData({
+      id: 'e1',
+      farmer_id: 'herd-1',
+      month_key: '2026-09',
+      expense_date: '2026-09-01T00:00:00.000Z',
+      ilai_selavu: '100',
+      kuthagai: 200,
+      medicine_others: null,
+      sambalam: '50.5',
+      petrol: 0,
+      tea_food: '20',
+      selavu: '29.5',
+      total: '400',
+      created_at: '2026-09-30T00:00:00.000Z',
+      updated_at: '2026-09-30T00:00:00.000Z',
+    });
+    expect(expense.monthKey).toBe('2026-09');
+    expect(expense.expenseDate).toBeInstanceOf(Date);
+    expect(expense.ilaiSelavu).toBe(100);
+    expect(expense.kuthagai).toBe(200);
+    expect(expense.medicineOthers).toBe(0);
+    expect(expense.total).toBe(400);
   });
 });

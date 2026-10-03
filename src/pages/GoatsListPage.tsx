@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   createGoat,
   getGoatByEarTag,
+  getOtherExpenses,
   recordVaccination,
   recordDeworming,
   recordWeight,
@@ -380,18 +381,22 @@ export const GoatsListPage: React.FC = () => {
   const handleExportExcel = async () => {
     try {
       if (filteredGoats.length === 0) { showToast('warning', 'No goats to export for the current filter'); return; }
-      showToast('info', 'Preparing export…', 'Building all 4 sheets');
+      if (!user) return;
+      showToast('info', 'Preparing export…', 'Building all 5 sheets');
       const filteredIds = new Set(filteredGoats.map((g) => g.id));
       // Collect sales from saleInfo embedded in the filtered goats
       const sales = filteredGoats.flatMap((g) => g.saleInfo ? [g.saleInfo] : []);
+      const allExpenses = await getOtherExpenses(user.id).catch(() => []);
+      const expenses = viewingHerdId ? allExpenses.filter((e) => e.farmerId === viewingHerdId) : allExpenses;
       await exportGoatsToExcel({
         goats: filteredGoats,
         weights: weightRecords.filter((w) => filteredIds.has(w.goatId)),
         dewormings: dewormingRecords.filter((d) => filteredIds.has(d.goatId)),
         vaccinations: vaccineRecords.filter((v) => filteredIds.has(v.goatId)),
         sales,
+        expenses,
       });
-      showToast('success', 'Excel exported!', `${filteredGoats.length} goat(s) matching current filter · 4 sheets`);
+      showToast('success', 'Excel exported!', `${filteredGoats.length} goat(s) matching current filter · 5 sheets`);
     } catch (error: any) {
       showToast('error', 'Export failed', error.message);
     }

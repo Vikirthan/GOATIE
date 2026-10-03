@@ -3,7 +3,7 @@ import * as indexedDB from '@/lib/indexeddb';
 const STORES: indexedDB.ObjectStore[] = [
   'goats', 'weights', 'deworming', 'vaccination', 'sales',
   'notifications', 'offlineQueue', 'syncHistory', 'variants',
-  'languages', 'memberships',
+  'languages', 'memberships', 'expenses',
 ];
 
 /** Wipe every IndexedDB store (fake-indexeddb in tests). */

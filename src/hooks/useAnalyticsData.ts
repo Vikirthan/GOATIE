@@ -4,12 +4,13 @@ import {
   getAllDeworming,
   getAllVaccinations,
   getFarmerGoats,
+  getOtherExpenses,
   isSupabaseEnabled,
 } from '@/services/firebaseService';
 import { getAllWeights } from '@/services/supabaseService';
 import { supabase } from '@/lib/supabase';
 import * as indexedDB from '@/lib/indexeddb';
-import type { DewormingRecord, Goat, PPRVaccinationRecord, WeightRecord } from '@/types';
+import type { DewormingRecord, Goat, OtherExpense, PPRVaccinationRecord, WeightRecord } from '@/types';
 
 const QUERY_KEY = ['analyticsData'];
 
@@ -18,6 +19,7 @@ export interface AnalyticsBundle {
   weights: WeightRecord[];
   dewormings: DewormingRecord[];
   vaccinations: PPRVaccinationRecord[];
+  expenses: OtherExpense[];
 }
 
 export const useAnalyticsData = (userId: string | undefined, viewingHerdId?: string | null) => {
@@ -35,6 +37,7 @@ export const useAnalyticsData = (userId: string | undefined, viewingHerdId?: str
         .on('postgres_changes', { event: '*', schema: 'public', table: 'deworming' }, invalidate)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'vaccinations' }, invalidate)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, invalidate)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'other_expenses' }, invalidate)
         .subscribe();
       return () => {
         supabase.removeChannel(channel);
@@ -48,18 +51,21 @@ export const useAnalyticsData = (userId: string | undefined, viewingHerdId?: str
     queryKey: [...QUERY_KEY, userId],
     queryFn: async (): Promise<AnalyticsBundle> => {
       if (!userId) throw new Error('User not authenticated');
-      const [allGoats, weights, dewormings, vaccinations] = await Promise.all([
+      const [allGoats, weights, dewormings, vaccinations, expenses] = await Promise.all([
         getFarmerGoats(userId),
         isSupabaseEnabled() ? getAllWeights() : indexedDB.getAllItems<WeightRecord>('weights'),
         getAllDeworming(),
         getAllVaccinations(),
+        getOtherExpenses(userId).catch(() => [] as OtherExpense[]),
       ]);
       const goatIds = new Set(allGoats.map((g) => g.id));
+      const herdIds = new Set(allGoats.map((g) => g.farmerId));
       return {
         goats: allGoats,
         weights: weights.filter((w) => goatIds.has(w.goatId)),
         dewormings: dewormings.filter((d) => goatIds.has(d.goatId)),
         vaccinations: vaccinations.filter((v) => goatIds.has(v.goatId)),
+        expenses: expenses.filter((e) => herdIds.has(e.farmerId)),
       };
     },
     enabled: !!userId,
@@ -67,7 +73,7 @@ export const useAnalyticsData = (userId: string | undefined, viewingHerdId?: str
   });
 
   const scoped = useMemo((): AnalyticsBundle => {
-    const empty: AnalyticsBundle = { goats: [], weights: [], dewormings: [], vaccinations: [] };
+    const empty: AnalyticsBundle = { goats: [], weights: [], dewormings: [], vaccinations: [], expenses: [] };
     if (!query.data) return empty;
     if (!viewingHerdId) return query.data;
     const goats = query.data.goats.filter((g) => g.farmerId === viewingHerdId);
@@ -77,6 +83,7 @@ export const useAnalyticsData = (userId: string | undefined, viewingHerdId?: str
       weights: query.data.weights.filter((w) => ids.has(w.goatId)),
       dewormings: query.data.dewormings.filter((d) => ids.has(d.goatId)),
       vaccinations: query.data.vaccinations.filter((v) => ids.has(v.goatId)),
+      expenses: (query.data.expenses || []).filter((e) => e.farmerId === viewingHerdId),
     };
   }, [query.data, viewingHerdId]);
 
