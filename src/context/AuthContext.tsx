@@ -106,8 +106,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       })();
     });
 
+    const fallback = setTimeout(() => setLoading(false), 2000);
+
     return () => {
       cancelled = true;
+      clearTimeout(fallback);
       unsubscribe();
     };
   }, []);
