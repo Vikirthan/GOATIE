@@ -67,7 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
         return;
       }
-      // Resolve role + herds in the background; user renders immediately.
+      setLoading(false);
       void (async () => {
         const [r, scope] = await Promise.all([
           ensureUserRole(currentUser.id),
@@ -90,8 +90,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setActiveHerdIdState(currentUser.id);
           setViewingHerdIdState(null);
         }
-        setLoading(false);
-        // Best-effort extras (never block auth): profile bootstrap + name map.
         void ensureUserProfile(currentUser.id, currentUser.displayName);
         try {
           const profiles = await getProfiles();
